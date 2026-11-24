@@ -11,7 +11,7 @@
    cp .env.example .env      # Windows PowerShell: copy .env.example .env
    uv run pytest             # 전부 통과해야 정상
    ```
-4. `.env` 에 각자 키 입력. Gemini 키는 A(검색·에이전트)는 필수, B·C 는 실제 호출을 볼 때만 필요. 키는 절대 커밋·공유 금지.
+4. 현재 가짜 구현과 테스트에는 외부 API 키가 필요 없다. 검색·LLM 제공자는 미정이며 실제 연동은 보류한다. 공공 가격 데이터를 사용할 때만 `.env` 에 해당 키를 입력한다. 키는 절대 커밋·공유 금지.
 
 ## 2. 읽기 (15분)
 1. [05 작업 규칙](05-working-agreement.md) — 특히 §1 역할, §4 Git, §5 AI 사용 규칙

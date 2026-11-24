@@ -11,7 +11,7 @@
 - 서버: `app/server.py` (FastAPI 등) — `POST /api/chat` → `agent.run(req)` (없으면 `fakes.fake_chat`), `POST /api/prices` → `data.prices.record_user_price` (없으면 fake)
 - 화면: 채팅 영역 + 오른쪽(모바일은 아래) 검색 창 카드 + 가격 입력 폼
 
-## 검색 창 규칙 (docs/06, 약관)
+## 검색 창 규칙 (docs/06)
 - [ ] `text`, `sources`, `suggestions_html` 을 **수정 없이** 그대로 표시 (`suggestions_html` 은 HTML 그대로 렌더링)
 - [ ] 에이전트 답변과 다른 영역에 표시 (끼워 넣지 않음)
 - [ ] 링크는 원래 URL로 새 탭에서 바로 연다. 중간 페이지·리다이렉트·클릭 추적 금지

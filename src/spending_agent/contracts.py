@@ -56,7 +56,7 @@ class SearchSource(TypedDict):
 
 
 class SearchPanelEvent(TypedDict):
-    """Gemini 그라운딩 결과. C 는 text·suggestions_html·sources 를 수정 없이 그대로 렌더링한다 (docs/06)."""
+    """검색 창 이벤트. C 는 text·suggestions_html·sources 를 수정 없이 그대로 렌더링한다 (docs/06)."""
     type: Literal["search_panel"]
     panel_id: str
     query: str

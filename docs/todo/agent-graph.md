@@ -1,7 +1,7 @@
-# 에이전트 흐름 (LangGraph + Gemini)
+# 에이전트 흐름 (LangGraph, LLM 제공자 미정)
 
 - 담당: A (Broogun)
-- 상태: 대기 (search-module 다음)
+- 상태: 대기 (가짜 구현으로 개발 가능, 실제 LLM 연동은 제공자 선정 후)
 - 관련: [contracts.py](../../src/spending_agent/contracts.py) `ChatRequest`/`ChatResponse`, 이전 구현 `archive/v0-data-pipeline:agent/graph.py`, `agent/validator.py`
 
 ## 목표
@@ -20,4 +20,4 @@
 - [ ] 검색 결과가 LLM 입력·state 에 없는지 테스트 (이전 test_agent.py 참고)
 
 ## 완료 기준
-가짜 LLM 테스트 통과 + 실제 Gemini 로 시나리오 3개(목표 점검, 구매 고민→검색 창, 확인 가격→계산) 수동 확인.
+가짜 LLM 으로 목표 점검, 구매 고민→검색 창, 확인 가격→계산 시나리오를 검증한다. 실제 LLM 수동 확인은 제공자 선정 후 진행한다.

@@ -45,7 +45,7 @@ def fake_forecast_goal(goal_amount: int, deadline: str, current_saved: int = 0) 
 def fake_search_panel(query: str) -> SearchPanelEvent:
     return {"type": "search_panel", "panel_id": "fake0001", "query": query,
             "text": f"(가짜 검색 요약) {query}: 대형마트 온라인몰, 공식몰에서 판매. 용량과 배송비를 함께 비교하세요.",
-            "suggestions_html": "<div class='fake-suggestion'>Google 검색 제안 자리</div>",
+            "suggestions_html": "<div class='fake-suggestion'>검색 제안 자리</div>",
             "sources": [{"title": "example.com", "uri": "https://example.com"}],
             "notice": SEARCH_NOTICE}
 

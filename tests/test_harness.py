@@ -1,13 +1,19 @@
 """하네스 자체 점검: 규칙 문서와 진입 파일이 서로 연결돼 있는지, 비밀값이 저장소에 없는지."""
+import importlib
 import pathlib
 import re
 import subprocess
 
+import pytest
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
-def test_package_imports():
-    import spending_agent.config  # noqa: F401
+@pytest.mark.parametrize("module_name", [
+    "spending_agent.config", "spending_agent.search", "spending_agent.agent", "spending_agent.data",
+])
+def test_package_imports(module_name):
+    importlib.import_module(module_name)
 
 
 def test_entry_files_point_to_working_agreement():
@@ -18,7 +24,7 @@ def test_entry_files_point_to_working_agreement():
 
 def test_docs_links_resolve():
     bad = []
-    for md in (ROOT / "docs").rglob("*.md"):
+    for md in [ROOT / "README.md", *(ROOT / "docs").rglob("*.md")]:
         for link in re.findall(r"\]\(([^)#\s]+\.md)", md.read_text(encoding="utf-8")):
             if not link.startswith("http") and not (md.parent / link).resolve().exists():
                 bad.append(f"{md.relative_to(ROOT)} -> {link}")

@@ -15,6 +15,3 @@ def get(name: str, default: str | None = None, required: bool = False) -> str | 
     if required and not value:
         raise RuntimeError(f"{name} 를 .env 에 넣어주세요 (.env.example 참고).")
     return value
-
-
-GEMINI_MODEL = get("GEMINI_MODEL", "gemini-2.5-flash")

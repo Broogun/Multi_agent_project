@@ -9,7 +9,7 @@ https://docs.google.com/document/d/1qNxeOV329Fr0PMaX9TIPHjwHkG9RrHqN3F6OLKTHtNU/
 
 | 담당 (GitHub) | 역할 | 맡는 일 | 주로 고치는 곳 | 리뷰어 | 첫 TODO |
 |---|---|---|---|---|---|
-| Broogun (팀장) | A | 검색·에이전트: Gemini 그라운딩, 에이전트 흐름, 프롬프트, 전체 통합 | `src/spending_agent/search/`, `src/spending_agent/agent/` | parky2won | [search-module](todo/search-module.md) |
+| Broogun (팀장) | A | 검색·에이전트: 검색 연동, 에이전트 흐름, 프롬프트, 전체 통합 | `src/spending_agent/search/`, `src/spending_agent/agent/` | parky2won | [search-module](todo/search-module.md) |
 | parky2won | B | 데이터·평가: 계산 로직, 사용자 확인 가격, 평가 시나리오 | `src/spending_agent/data/`, `eval/`, `tests/` | KIM-YUNHO | [calc-core](todo/calc-core.md) |
 | KIM-YUNHO | C | 화면·연동: 웹 UI, 검색 창 렌더링, 가격 입력, 시연 | `app/` | Broogun | [web-ui](todo/web-ui.md) |
 
@@ -44,7 +44,7 @@ https://docs.google.com/document/d/1qNxeOV329Fr0PMaX9TIPHjwHkG9RrHqN3F6OLKTHtNU/
 ## 4. Git 규칙
 
 - 기본 브랜치: `main`. 직접 push 금지, PR로만 합친다.
-- 브랜치 이름: `<github아이디 소문자>/<YYMMDD>-<slug>` (예: `broogun/261125-grounding-client`).
+- 브랜치 이름: `<github아이디 소문자>/<YYMMDD>-<slug>` (예: `broogun/261125-search-client`).
 - PR: 다른 팀원 1명 승인 + CI 통과 후 **Squash merge**. 승인자는 담당 범위 리뷰어(§1).
 - PR 크기: 리뷰어가 30분 안에 읽을 수 있게. 크면 쪼갠다.
 - 커밋 메시지: 한국어 한 줄 요약 + 필요하면 본문. AI가 쓴 커밋도 사람이 내용을 읽고 올린다.
@@ -62,7 +62,7 @@ https://docs.google.com/document/d/1qNxeOV329Fr0PMaX9TIPHjwHkG9RrHqN3F6OLKTHtNU/
 ## 6. 키·비용 관리
 
 - 키는 각자 발급해 각자 `.env`에 둔다. 공유가 필요한 키는 팀 채널 DM으로만 전달하고 저장소에는 `.env.example`에 이름만 적는다.
-- Gemini API: 결제 계정을 연결한 키를 쓴다 (무료 티어는 입력이 Google 학습에 쓰인다). 각자 월 예산 알림을 설정한다. 그라운딩 검색은 검색 횟수마다 과금된다 → [06-search-policy](06-search-policy.md#비용).
+- 검색·LLM 제공자는 미정이며 실제 연동은 보류한다. 도입 전에 데이터 이용 조건·지원 지역·과금 방식과 예산을 확인한다 → [06-search-policy](06-search-policy.md#비용).
 - 테스트는 가짜 LLM으로 돌린다. 실제 API를 부르는 테스트는 `@pytest.mark.live`로 표시하고 CI에서 돌리지 않는다.
 
 ## 7. 문서 규칙
