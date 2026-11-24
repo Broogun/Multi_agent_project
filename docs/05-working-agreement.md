@@ -7,11 +7,14 @@ https://docs.google.com/document/d/1qNxeOV329Fr0PMaX9TIPHjwHkG9RrHqN3F6OLKTHtNU/
 
 ## 1. 역할과 담당 범위
 
-| 담당 | 이니셜 | 맡는 일 | 주로 고치는 곳 | 리뷰 기본 담당 |
-|---|---|---|---|---|
-| (이름 채우기) | A | 검색·에이전트: Gemini 그라운딩, 에이전트 흐름, 프롬프트 | `src/spending_agent/search/`, `src/spending_agent/agent/` | B |
-| (이름 채우기) | B | 데이터·평가: 사용자 데이터, 계산 로직, 테스트셋·평가 | `src/spending_agent/data/`, `eval/`, `tests/` | C |
-| (이름 채우기) | C | 화면·연동: 웹 UI, 검색 창 렌더링, 시연 | `app/`, `docs/08-demo-*` | A |
+| 담당 (GitHub) | 역할 | 맡는 일 | 주로 고치는 곳 | 리뷰어 | 첫 TODO |
+|---|---|---|---|---|---|
+| Broogun (팀장) | A | 검색·에이전트: Gemini 그라운딩, 에이전트 흐름, 프롬프트, 전체 통합 | `src/spending_agent/search/`, `src/spending_agent/agent/` | parky2won | [search-module](todo/search-module.md) |
+| parky2won | B | 데이터·평가: 계산 로직, 사용자 확인 가격, 평가 시나리오 | `src/spending_agent/data/`, `eval/`, `tests/` | KIM-YUNHO | [calc-core](todo/calc-core.md) |
+| KIM-YUNHO | C | 화면·연동: 웹 UI, 검색 창 렌더링, 가격 입력, 시연 | `app/` | Broogun | [web-ui](todo/web-ui.md) |
+
+- 팀장(A)은 계약(`src/spending_agent/contracts.py`)과 통합을 책임진다. 계약은 3명 합의로만 바꾼다.
+- 다른 담당의 코드가 아직 없으면 `src/spending_agent/fakes.py` 로 개발한다 → [07 온보딩](07-onboarding.md).
 
 - 담당 범위 밖 파일도 고칠 수 있다. 대신 PR에서 그 범위 담당자를 리뷰어로 지정한다 (`.github/CODEOWNERS`).
 - 역할을 바꾸면 이 표와 CODEOWNERS를 같은 PR에서 고친다.
@@ -41,7 +44,7 @@ https://docs.google.com/document/d/1qNxeOV329Fr0PMaX9TIPHjwHkG9RrHqN3F6OLKTHtNU/
 ## 4. Git 규칙
 
 - 기본 브랜치: `main`. 직접 push 금지, PR로만 합친다.
-- 브랜치 이름: `<이니셜>/<YYMMDD>-<slug>` (예: `a/261125-grounding-client`).
+- 브랜치 이름: `<github아이디 소문자>/<YYMMDD>-<slug>` (예: `broogun/261125-grounding-client`).
 - PR: 다른 팀원 1명 승인 + CI 통과 후 **Squash merge**. 승인자는 담당 범위 리뷰어(§1).
 - PR 크기: 리뷰어가 30분 안에 읽을 수 있게. 크면 쪼갠다.
 - 커밋 메시지: 한국어 한 줄 요약 + 필요하면 본문. AI가 쓴 커밋도 사람이 내용을 읽고 올린다.
@@ -64,7 +67,7 @@ https://docs.google.com/document/d/1qNxeOV329Fr0PMaX9TIPHjwHkG9RrHqN3F6OLKTHtNU/
 
 ## 7. 문서 규칙
 
-- 리포트 파일명: `YYMMDD-HHMM-<이니셜>-slug.md` (예: `261124-1530-a-search-pivot.md`). 이니셜을 넣어 3명이 동시에 만들어도 겹치지 않게 한다.
+- 리포트 파일명: `YYMMDD-HHMM-<역할 a/b/c>-slug.md` (예: `261124-1530-a-search-pivot.md`). 역할 글자를 넣어 3명이 동시에 만들어도 겹치지 않게 한다.
 - TODO 파일명: `slug.md`, 목록 `docs/todo/00-todo-list.md`에 담당자와 함께 등록.
 - 형식은 각 폴더의 `_template.md`를 따른다.
 - 문서는 짧게 유지한다. `00-status.md`는 40줄 이내, 본문 복제 금지(링크만).

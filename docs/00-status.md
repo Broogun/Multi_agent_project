@@ -12,16 +12,16 @@
 - 계산 가격은 사용자가 판매처에서 확인한 값과 공공 데이터만 → [06](06-search-policy.md)
 - LLM은 숫자를 만들지 않음, 결정은 사용자 → [05 §3](05-working-agreement.md#3-원칙-기획의-결정-사항)
 - 에이전트 LLM은 Gemini로 통일 (SDK `google-genai`, 흐름 `langgraph`)
+- 역할: A Broogun · B parky2won · C KIM-YUNHO. 모듈 계약은 `contracts.py`, 미완성 부분은 `fakes.py` 로 개발 → [05 §1](05-working-agreement.md#1-역할과-담당-범위)
 
 ## 담당별 현황 (자기 줄만 고친다)
 | 담당 | 지금 하는 일 | 막힌 것 |
 |---|---|---|
-| A 검색·에이전트 | - | Gemini API 키(결제 연결) |
-| B 데이터·평가 | - | 실제 거래 CSV 확보 |
-| C 화면·연동 | - | - |
+| A 검색·에이전트 (Broogun) | 역할 배정·계약·가짜 구현 | Gemini API 키(결제 연결) |
+| B 데이터·평가 (parky2won) | - | - |
+| C 화면·연동 (KIM-YUNHO) | - | 저장소 초대 수락 |
 
 ## 열린 질문
-- 팀원 이름·역할 확정 → [05 §1](05-working-agreement.md#1-역할과-담당-범위), `.github/CODEOWNERS`
 - 검색 기반으로 바꾸면서 남길 기능 범위 (구독 점검·목표 계산을 유지할지) → [03](03-product-plan.md)
 - Gemini 모델 ID와 한국 사용 가능 지역 확인
 

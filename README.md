@@ -16,6 +16,14 @@ uv run pytest                # 하네스 점검 포함
 2. [현재 상태](docs/00-status.md)
 3. [폴더 구조](docs/01-folder-architecture.md), [검색 사용 원칙](docs/06-search-policy.md)
 
+새 팀원은 [온보딩](docs/07-onboarding.md)부터.
+
+| 역할 | 담당 | 첫 작업 |
+|---|---|---|
+| A 검색·에이전트 | Broogun (팀장) | [search-module](docs/todo/search-module.md) |
+| B 데이터·평가 | parky2won | [calc-core](docs/todo/calc-core.md) |
+| C 화면·연동 | KIM-YUNHO | [web-ui](docs/todo/web-ui.md) |
+
 AI 에이전트(Cursor, Claude Code, Codex 등)는 `AGENTS.md`를 통해 같은 규칙을 읽는다.
 
 ## 이전 버전
