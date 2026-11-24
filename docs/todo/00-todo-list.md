@@ -4,10 +4,12 @@
 
 | 상태 | 할 일 | 담당 | 상세 |
 |---|---|---|---|
-| 대기 | 팀원 이름·역할 확정, CODEOWNERS 반영, GitHub 초대·main 보호 | 전원 | [05 §1](../05-working-agreement.md#1-역할과-담당-범위) |
 | 대기 | 검색 기반 범위 결정 (남길 기능) | 전원 | [03](../03-product-plan.md) |
-| 대기 | Gemini 그라운딩 검색 모듈 (결과는 UI 이벤트로만, 격리 테스트) | A | [search-module](search-module.md) |
-| 대기 | 06의 미확인 4건 확인 (지역·고지 문구·리다이렉트·모델) | A | [06](../06-search-policy.md#미확인-구현-전에-확인) |
-| 대기 | 구매 판단 계산 (단위가격·소진 기간·목표 영향) + 사용자 확인 가격 저장 | B | |
-| 대기 | 평가 시나리오 10개 (구매 고민 → 기대 행동) | B | |
-| 대기 | 검색 창 UI (검색 제안 HTML 렌더링, 고지 문구, 링크 직접 열기) | C | |
+| 대기 | GitHub main 브랜치 보호 (PR 필수, 승인 1, CI) | Broogun | [05 §4](../05-working-agreement.md#4-git-규칙) |
+| 보류 | 검색 제공자 선정 및 검색 모듈 | A Broogun | [search-module](search-module.md) |
+| 대기 | 에이전트 흐름 `agent.run()` | A Broogun | [agent-graph](agent-graph.md) |
+| 보류 | 검색 제공자 선정 후 약관·지역·표시·과금 확인 | A Broogun | [06](../06-search-policy.md#미확인-구현-전에-확인) |
+| 대기 | 계산 함수 3개 + 사용자 확인 가격 저장 | B parky2won | [calc-core](calc-core.md) |
+| 대기 | 평가 시나리오 10개 + 채점 스크립트 | B parky2won | [eval-scenarios](eval-scenarios.md) |
+| 대기 | 웹 UI: 채팅 + 검색 창 + 가격 입력 | C KIM-YUNHO | [web-ui](web-ui.md) |
+| 대기 | 시연 시나리오 문서 | C KIM-YUNHO | |

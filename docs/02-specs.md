@@ -11,12 +11,14 @@
   "type": "search_panel",
   "panel_id": "8자리",
   "query": "상품명 + 용량 (개인정보 없음)",
-  "text": "Gemini 그라운딩 답변 (수정 금지)",
-  "suggestions_html": "Google 검색 제안 HTML (그대로 렌더링)",
+  "text": "검색 답변 (수정 금지)",
+  "suggestions_html": "제공자가 보내는 검색 제안 HTML 또는 null (있으면 그대로 렌더링)",
   "sources": [{"title": "...", "uri": "..."}],
   "notice": "검색 결과이며, 실제 가격은 판매처에서 확인하세요."
 }
 ```
+
+외부 검색 제공자는 미정이며 실제 연동은 보류한다. 기존 이벤트의 필드와 타입은 유지하고, 화면은 `fakes.fake_search_panel` 로 먼저 개발한다.
 
 ## 사용자 확인 가격 (app → data)
 

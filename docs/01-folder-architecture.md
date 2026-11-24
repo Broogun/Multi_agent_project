@@ -22,12 +22,15 @@ Multi_agent_project/
 │  ├─ 04-glossary.md         # 용어
 │  ├─ 05-working-agreement.md # 작업 규칙 (먼저 읽기)
 │  ├─ 06-search-policy.md    # 검색 API 사용 원칙 (약관·저장·표시)
+│  ├─ 07-onboarding.md       # 팀원 첫날 30분
 │  ├─ todo/                  # 할 일 (00-todo-list.md + 상세 파일)
 │  ├─ reports/               # 결정·완료 기록 (YYMMDD-HHMM-이니셜-slug.md)
 │  └─ learning/              # 학습 문서 (참고용)
 ├─ src/spending_agent/       # 코드 (Python 패키지)
 │  ├─ config.py              # .env 로딩
-│  ├─ search/                # A: Gemini 그라운딩 검색 (결과는 UI로만)
+│  ├─ contracts.py           # 모듈 사이 계약 (3명 합의로만 변경)
+│  ├─ fakes.py               # 가짜 구현 (다른 담당 코드가 없을 때 개발용)
+│  ├─ search/                # A: 검색 모듈 자리 (제공자 미정, 결과는 UI로만)
 │  ├─ agent/                 # A: 에이전트 흐름 (LangGraph)
 │  └─ data/                  # B: 사용자 데이터·계산
 ├─ app/                      # C: 웹 UI
@@ -40,4 +43,4 @@ Multi_agent_project/
 └─ out/                      # 생성물 (git 제외)
 ```
 
-실행: `uv sync` → `uv run pytest` → (키 설정 후) 각 모듈 README.
+개발 준비: `uv sync --group dev` → `uv run pytest`. 현재는 계약·가짜 구현을 제공하며, 실제 API와 웹 UI는 아직 구현 전이다.
