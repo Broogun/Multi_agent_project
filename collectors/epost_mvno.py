@@ -33,7 +33,7 @@ def main():
     status, body = http_get(URL, params)
     raw = save_raw("epost_mvno", "list.xml", body)
     try:
-        rows = parse_xml_items(body, "AlddlCharge")
+        rows = parse_xml_items(body, "alddlCharge")
     except ApiError as e:
         log(con, SOURCE_ID, "getAlddlChargeList", params, status, "ERR", 0, raw)
         con.commit()

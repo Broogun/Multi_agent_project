@@ -2,3 +2,4 @@
 __pycache__/
 scripts/_probe_out/
 data/
+.archify/

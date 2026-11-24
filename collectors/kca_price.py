@@ -100,7 +100,7 @@ def now() -> str:
 
 def connect() -> sqlite3.Connection:
     DATA.mkdir(exist_ok=True)
-    con = sqlite3.connect(DB_PATH, check_same_thread=False)
+    con = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=60)
     con.executescript(SCHEMA)
     return con
 

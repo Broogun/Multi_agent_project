@@ -5,8 +5,8 @@
     python collectors/kostat_online_price.py prices --start 20261101 --end 20261120 --item A01101
 
 상태: 경로(getPriceItemList, getPriceInfo)는 게이트웨이 응답으로 존재 확인.
-응답 필드명은 활용신청 승인 후 실제 응답으로 확인해야 한다. 그 전까지는 원본 행 전체를 raw(JSON)로 저장하고,
-알려진 후보 필드명으로 주요 컬럼을 채운다.
+응답 필드 (2026-11-24 실제 응답으로 확인): 품목 ic=코드, in=이름 / 가격 pi=상품ID, pn=상품명, sp=정가,
+dp=할인가, bp=혜택, sd=날짜. 최근 며칠은 아직 없을 수 있다 (resultCode 21).
 """
 import argparse
 import datetime as dt
@@ -55,7 +55,7 @@ def collect_items(con, key):
     for p, status, rows, raw in paged("getPriceItemList", {}, key, "serviceKey"):
         con.executemany(
             "INSERT OR REPLACE INTO online_item VALUES (?,?,?,?)",
-            [(pick(r, "itemCode", "item_code", "itemCd"), pick(r, "itemName", "item_nm", "itemNm"),
+            [(pick(r, "ic", "itemCode", "item_code"), pick(r, "in", "itemName", "item_nm"),
               json.dumps(r, ensure_ascii=False), ts) for r in rows],
         )
         log(con, SOURCE_ID, "getPriceItemList", p, status, "00", len(rows), raw)
@@ -78,9 +78,9 @@ def collect_prices(con, key, start, end, items):
                 ts = now()
                 con.executemany(
                     "INSERT OR REPLACE INTO online_price VALUES (?,?,?,?,?,?,?)",
-                    [(code, pick(r, "priceDate", "date", "collectDate", "srvyDt"),
-                      pick(r, "productName", "goodsName", "prdctNm", "itemName"),
-                      num(pick(r, "price", "salePrice", "prc")),
+                    [(code, pick(r, "sd", "priceDate", "date"),
+                      pick(r, "pn", "productName", "goodsName"),
+                      num(pick(r, "dp", "sp", "price")),  # dp=할인가, sp=정가 (raw에 둘 다 보존)
                       hashlib.sha1(json.dumps(r, sort_keys=True).encode()).hexdigest()[:16],
                       json.dumps(r, ensure_ascii=False), ts) for r in rows],
                 )
@@ -94,12 +94,25 @@ def collect_prices(con, key, start, end, items):
     print(f"가격 {total}건 ({start}~{end}, 품목 {len(items)}개)")
 
 
+def latest_day(key, probe_item="A01101", max_back=30) -> str:
+    """데이터가 있는 가장 최근 날짜 (공개까지 약 10일 지연)."""
+    d = dt.date.today()
+    for _ in range(max_back):
+        d -= dt.timedelta(days=1)
+        ds = d.strftime("%Y%m%d")
+        _, body = http_get(f"{BASE}/getPriceInfo", {"ServiceKey": key, "pageNo": 1, "numOfRows": 1,
+                                                    "itemCode": probe_item, "startDate": ds, "endDate": ds})
+        if b"<totalCount>" in body and b"<totalCount>0<" not in body:
+            return ds
+    raise ApiError(f"최근 {max_back}일 안에 데이터가 없습니다.")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["items", "prices"])
     ap.add_argument("--start")
     ap.add_argument("--end")
-    ap.add_argument("--days", type=int, default=7)
+    ap.add_argument("--days", type=int, default=1, help="end 포함 며칠치 (품목 전체 하루 ≈ 20만 건)")
     ap.add_argument("--item", action="append", help="품목코드 (여러 번 지정 가능)")
     a = ap.parse_args()
     key, con = load_key(), connect(SCHEMA)
@@ -107,7 +120,7 @@ def main():
         if a.cmd == "items":
             collect_items(con, key)
         else:
-            end = a.end or (dt.date.today() - dt.timedelta(days=1)).strftime("%Y%m%d")
+            end = a.end or latest_day(key)
             start = a.start or (dt.datetime.strptime(end, "%Y%m%d") - dt.timedelta(days=a.days - 1)).strftime("%Y%m%d")
             collect_prices(con, key, start, end, a.item)
     except ApiError as e:
