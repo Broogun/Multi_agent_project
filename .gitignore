@@ -15,9 +15,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# 데이터·생성물 (data/manual 은 공유)
+# 데이터·생성물 (안내 문서만 공유)
 data/*
-!data/manual/
 !data/README.md
 out/
 eval/runs/

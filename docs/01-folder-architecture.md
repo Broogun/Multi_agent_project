@@ -37,9 +37,8 @@ Multi_agent_project/
 ├─ tests/                    # pytest (가짜 LLM, 네트워크 없음)
 ├─ eval/                     # B: 평가셋·채점 기록
 ├─ scripts/                  # 일회성·운영 스크립트
-├─ data/
-│  └─ manual/                # 수동 정리 규칙 (구독 요금·제도·가맹점 사전, 출처·기준일 포함)
-│                            # data/ 의 나머지(로컬 DB, 원본)는 git 제외
+├─ data/                     # 로컬 데이터 (DB·원본·수동 YAML 모두 git 제외)
+│  └─ README.md              # 데이터 보관 안내만 공유
 └─ out/                      # 생성물 (git 제외)
 ```
 
