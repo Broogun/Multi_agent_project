@@ -54,6 +54,8 @@ def main():
         for line in env_file.read_text(encoding="utf-8-sig").splitlines():
             if line.strip().startswith("DATA_GO_KR_KEY="):
                 key = line.split("=", 1)[1].strip().strip('"')
+    if key and "%" in key:  # Encoding 키가 들어오면 디코딩해 이중 인코딩 방지
+        key = urllib.parse.unquote(key)
     if not key:
         sys.exit("DATA_GO_KR_KEY 환경변수에 Decoding 인증키를 넣어주세요.")
     OUT.mkdir(exist_ok=True)
