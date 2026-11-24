@@ -1,3 +1,4 @@
 .env
 __pycache__/
 scripts/_probe_out/
+data/
