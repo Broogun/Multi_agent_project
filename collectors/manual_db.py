@@ -45,6 +45,8 @@ def load_all():
     seen = set()
     for f in sorted(MANUAL.glob("*.yaml")):
         doc = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        if "merchants" in doc:  # 가맹점 사전(M06)은 pipeline/merchants.py 가 직접 읽는다
+            continue
         for section, items in doc.items():
             for e in items or []:
                 where = f"{f.name}:{section}:{e.get('id', '?')}"

@@ -91,6 +91,14 @@ for d in days():
         add("a", d, t(22, 23) if rng.random() < 0.6 else t(12, 20), rng.choice(["쿠팡", "무신사", "29CM", "올리브영온라인"]),
             rng.randrange(12000, 89000, 100))
 
+    # 출퇴근 교통 (평일 2회): 8~9월 지하철, 10월부터 이사로 광역버스 (F08 교통 패턴 변화)
+    if d.weekday() < 5:
+        for h in (8, 19):
+            if d.month < 10:
+                add("b", d, dt.time(h, rng.randint(0, 40), 0), "후불교통(지하철)", 1550)
+            else:
+                add("b", d, dt.time(h, rng.randint(0, 40), 0), "경기광역버스 M4101", 3000)
+
 # 환불: 무신사 주문 하나 취소
 orig = next(r for r in card_a if r["merchant"] == "무신사")
 add("a", orig["date"] + dt.timedelta(days=3), t(), "무신사", orig["amount"], cancel=True, approval=orig["no"])
@@ -173,7 +181,10 @@ def write():
         "same_day_same_store_legit": {"date": "2026-10-07", "merchant": "메가커피 강남역점", "count_min": 2},
         "recurring": [{"merchant": m, "amount": a, "day": d} for m, a, d, _, _ in SUBS],
         "duplicate_subscription": ["넷플릭스", "NETFLIX.COM"],
-        "free_trial_conversion": {"merchant": "쿠팡와우", "trial": "2026-09-15", "paid": "2026-10-15"},
+        "free_trial_conversion": {"merchant": "쿠팡 와우", "trial": "2026-09-15", "paid": "2026-10-15"},
+        "transit_pattern_changed": True,
+        "recurring_brands": ["넷플릭스", "유튜브 프리미엄", "멜론", "헬스장"],
+        "delivery_brands": ["배달의민족", "쿠팡이츠", "요기요"],
     }
     (OUT / "truth.json").write_text(json.dumps(truth, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"생성: {OUT.relative_to(ROOT)} (카드A {len(card_a)}, 카드B {len(card_b)}, 은행 {len(bank)}, 가계부 {len(ledger)}행)")

@@ -37,13 +37,29 @@ python collectors/kca_price.py prices --day 20261106
 ```
 python -m pipeline.synthetic                       # 합성 CSV 4종 + 정답(truth.json) 생성 → data/synthetic/
 python -m pipeline.ingest data/synthetic/*.csv --user u_demo --self-name 김하늘
-python -m unittest tests.test_ingest -v            # 정답 대비 테스트
+python -m pipeline.merchants --user u_demo         # 가맹점 사전(M06) 적용
+python -m pipeline.features --user u_demo          # 정기결제 탐지 + F01~F08
+python -m unittest discover tests -v               # 정답 대비 테스트
 ```
 - 인코딩 자동 판별(utf-8/cp949), 헤더 위 안내문 건너뛰기, 포맷 자동 인식 (`pipeline/formats.py`에 템플릿 추가)
 - 거래 유형: spend / refund(음수) / income / transfer / card_settlement
 - 이중 계산 방지: 은행의 카드대금 출금, 본인 계좌 이체는 지출 합계에서 제외 (`v_spending` 뷰)
 - 중복: 같은 원본 행·같은 승인번호는 확정 중복(저장 안 함), 원천 ID 없는 (날짜·금액·가맹점) 일치는 후보로 표시만
 - 저장: `data/user.db` (사용자 데이터는 공공 데이터 DB와 분리)
+- 가맹점 사전: `data_manual/merchants.yaml` (브랜드·카테고리·태그, 위에서부터 먼저 맞는 것)
+- 파생 지표 (`pipeline/features.py`, 규칙 기반, 버전 기록):
+
+| ID | 지표 | 저장 |
+|---|---|---|
+| F01 | 배달앱 주간 건수·금액 | feature_weekly |
+| F02 | 편의점 1만 원 미만 결제 | feature_weekly |
+| F03 | 택시 건수·심야 비율 (시각 있는 거래만) | feature_weekly |
+| F04 | 카페 브랜드별 결제, 탄소중립포인트 참여 브랜드 확인 전에는 혜택 미계산 | feature_weekly |
+| F05 | 가맹점 내 결제액 분포 (5회 이상) | feature_period |
+| F06 | 무료체험 → 유료 전환 | feature_period |
+| F07 | 같은 구독 같은 달 중복 결제 | feature_period |
+| F08 | 교통 패턴 변화 (최근 2개월 vs 이전, 광역 비중) | feature_weekly / feature_period |
+| - | 정기결제 (금액 ±10%, 간격 25~35일 등, 가맹점 결제의 80% 이상이 주기적일 때) | recurring |
 
 ## 키가 별도인 외부 API
 - 온통청년 청년정책(P14): `https://www.youthcenter.go.kr/go/ythip/getPlcy` — 온통청년 회원가입 후 마이페이지에서 인증키 신청, 담당자 심사 후 발급
