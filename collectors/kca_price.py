@@ -5,6 +5,7 @@
     python collectors/kca_price.py prices            # 데이터가 있는 가장 최근 조사일 가격 수집
     python collectors/kca_price.py prices --day 20261106
     python collectors/kca_price.py all               # master + prices
+    python collectors/kca_price.py backfill --weeks 26   # 과거 조사일 일괄 수집 (이미 받은 날 건너뜀)
 
 설계 (3-2 탭 기준):
 - 원본 응답은 data/raw/kca/<종류>/<날짜>/ 에 gzip으로 그대로 보관
@@ -263,10 +264,37 @@ def collect_prices(con, key, day: str | None, workers: int, limit: int | None):
     print(f"완료: 상품 {done}개, 가격 {total}건 → {DB_PATH.relative_to(ROOT)}")
 
 
+def has_data(key, day, goods) -> bool:
+    for g in goods:
+        *_, rows, _ = fetch_price(key, day, g)
+        if rows:
+            return True
+    return False
+
+
+def backfill(con, key, weeks: int, workers: int):
+    """최근 N주 금요일을 거슬러 올라가며 데이터가 있는 조사일만 수집. 이미 끝난 날은 건너뜀."""
+    if not con.execute("SELECT 1 FROM kca_product LIMIT 1").fetchone():
+        collect_master(con, key)
+    n_goods = con.execute("SELECT count(*) FROM kca_product").fetchone()[0]
+    probe = [r[0] for r in con.execute(
+        "SELECT good_id FROM kca_price GROUP BY good_id ORDER BY count(*) DESC LIMIT 3")] or ["35"]
+    for day in fridays_back(weeks):
+        done = con.execute("SELECT count(*) FROM kca_price_done WHERE inspect_day=?", (day,)).fetchone()[0]
+        if done >= n_goods:
+            print(f"{day}: 이미 수집됨")
+            continue
+        if not done and not has_data(key, day, probe):
+            print(f"{day}: 데이터 없음")
+            continue
+        collect_prices(con, key, day, workers, None)
+
+
 # ---------------------------------------------------------------- CLI
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["master", "prices", "all"])
+    ap.add_argument("cmd", choices=["master", "prices", "all", "backfill"])
+    ap.add_argument("--weeks", type=int, default=26, help="backfill: 거슬러 올라갈 주 수")
     ap.add_argument("--day", help="조사일 YYYYMMDD (금요일). 생략 시 데이터가 있는 가장 최근 금요일")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--limit", type=int, help="상품 수 제한 (테스트용)")
@@ -278,6 +306,8 @@ def main():
         collect_master(con, key)
     if a.cmd in ("prices", "all"):
         collect_prices(con, key, a.day, a.workers, a.limit)
+    if a.cmd == "backfill":
+        backfill(con, key, a.weeks, a.workers)
 
 
 if __name__ == "__main__":
