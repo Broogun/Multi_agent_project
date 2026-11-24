@@ -63,3 +63,26 @@ python -m unittest discover tests -v               # 정답 대비 테스트
 
 ## 키가 별도인 외부 API
 - 온통청년 청년정책(P14): `https://www.youthcenter.go.kr/go/ythip/getPlcy` — 온통청년 회원가입 후 마이페이지에서 인증키 신청, 담당자 심사 후 발급
+
+## MCP Tool 서버 (`mcp_server.py`, `tools/`)
+```
+python mcp_server.py                                   # stdio 서버
+claude mcp add spending -- python <프로젝트 경로>/mcp_server.py   # Claude Code에 등록
+```
+모든 Tool은 `{status, value, calc, sources, as_of, caveats}`를 돌려준다. `status`가 `needs_check`/`no_data`면 에이전트는 숫자를 말하지 않는다.
+
+| Tool | 데이터 | 비고 |
+|---|---|---|
+| `detect_recurring` | 거래내역 | 정기결제 목록·다음 예상일 |
+| `check_subscriptions` | 거래내역 + M03 | 연결제·하위 요금제(공식 출처일 때만 절감액), 중복 결제(F07), 무료체험 전환(F06) |
+| `forecast_goal` | 거래내역 | 필요 월 저축액, 최근 3개월 여유자금, 기한 시점 예상액 |
+| `compare_mobile_plan` | P01 (요청 시 호출, 14일 캐시) | 위약금·결합할인 해제 반영 12개월 순절감액. 약정 남으면 위약금 필수 |
+| `calc_transit_refund` | M02 | 규칙이 공식 확인 전이면 needs_check |
+| `get_price_baseline` | P02 (로컬 스냅샷) + P04 (요청 시 호출, 3일 캐시) | 기준선, 실시간 최저가 아님 |
+| `calc_bulk_purchase` | 사용자 확인 가격 | 검색 결과 가격 거부 |
+| `record_user_price` | 사용자 확인 가격 | user_verified / receipt_ocr / capture_ocr 만 저장 |
+| `check_benefit_programs` | M08 | usable 상태 포함 |
+| `get_source_info` | 출처 레지스트리 | |
+
+API 응답 캐시는 `data/prices.db`의 `api_cache` 테이블 (인증키는 캐시 키·로그에 남기지 않음).
+아직 없음: `match_strategies`, `evaluate_recommendation_outcome` (추천 이벤트 로깅 후).

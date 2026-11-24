@@ -17,7 +17,7 @@ class IngestTest(unittest.TestCase):
     def setUpClass(cls):
         synthetic.write()
         cls.truth = json.loads((synthetic.OUT / "truth.json").read_text(encoding="utf-8"))
-        cls.tmp = tempfile.TemporaryDirectory()
+        cls.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         ingest.DB_PATH = pathlib.Path(cls.tmp.name) / "user.db"
         cls.con = ingest.connect()
         cls.results = [ingest.ingest_file(cls.con, synthetic.OUT / f, "u", [cls.truth["user_self_name"]]) for f in FILES]
