@@ -86,3 +86,17 @@ claude mcp add spending -- python <프로젝트 경로>/mcp_server.py   # Claude
 
 API 응답 캐시는 `data/prices.db`의 `api_cache` 테이블 (인증키는 캐시 키·로그에 남기지 않음).
 아직 없음: `match_strategies`, `evaluate_recommendation_outcome` (추천 이벤트 로깅 후).
+
+## 에이전트 (`agent/`, LangGraph + Gemini)
+```
+# .env 에 GEMINI_API_KEY=... (결제 계정 연결된 키 권장: 무료 티어는 입력이 학습에 쓰임)
+python -m agent.run --user u_demo -m "10개월 뒤 여행 가려고 200만 원 모으는 중이야. 지금 50만 원 있어. 가능할까?"
+python -m agent.run --user u_demo        # 대화 모드
+```
+그래프: `agent → tools → (search) → agent … → validate → END`
+- **agent**: Gemini가 Tool을 고르고 답한다. 숫자는 Tool 결과만 인용.
+- **tools**: `tools/core.py` 실행. `user_id`는 서버가 넣는다 (LLM이 다른 사용자를 고를 수 없음).
+- **search**: `open_search_panel` → Gemini Google 검색 그라운딩. 결과(요약·검색 제안·출처)는 UI 스트림으로만 나가고, LLM 대화·state에는 들어가지 않는다 (Gemini API 약관: 수정·분석·캐시 금지).
+- **validate**: 답변 숫자를 Tool 결과·사용자 입력과 대조. 실패 시 1회 재작성, 그래도 실패하면 해당 문장 제거.
+- 모델: `GEMINI_MODEL` 환경변수 (기본 `gemini-2.5-flash`).
+- 다음 단계: 개입·비개입 정책, Outcome Tracking 노드, 웹 UI (검색 제안 HTML 렌더링).
