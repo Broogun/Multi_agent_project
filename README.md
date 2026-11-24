@@ -32,3 +32,18 @@ python collectors/kca_price.py prices --day 20261106
 
 수동 DB는 YAML이 원본이다. 모든 항목에 `source_url`, `source_grade`, `as_of`, `review_by` 필수.
 `v_manual_rule_active.usable` 이 `ok` 인 규칙만 계산에 쓴다 (`needs_official_source`·`stale`·`inactive` 는 보류).
+
+## 거래내역 파이프라인 (`pipeline/`)
+```
+python -m pipeline.synthetic                       # 합성 CSV 4종 + 정답(truth.json) 생성 → data/synthetic/
+python -m pipeline.ingest data/synthetic/*.csv --user u_demo --self-name 김하늘
+python -m unittest tests.test_ingest -v            # 정답 대비 테스트
+```
+- 인코딩 자동 판별(utf-8/cp949), 헤더 위 안내문 건너뛰기, 포맷 자동 인식 (`pipeline/formats.py`에 템플릿 추가)
+- 거래 유형: spend / refund(음수) / income / transfer / card_settlement
+- 이중 계산 방지: 은행의 카드대금 출금, 본인 계좌 이체는 지출 합계에서 제외 (`v_spending` 뷰)
+- 중복: 같은 원본 행·같은 승인번호는 확정 중복(저장 안 함), 원천 ID 없는 (날짜·금액·가맹점) 일치는 후보로 표시만
+- 저장: `data/user.db` (사용자 데이터는 공공 데이터 DB와 분리)
+
+## 키가 별도인 외부 API
+- 온통청년 청년정책(P14): `https://www.youthcenter.go.kr/go/ythip/getPlcy` — 온통청년 회원가입 후 마이페이지에서 인증키 신청, 담당자 심사 후 발급
