@@ -1,0 +1,7 @@
+---
+description: 팀 공용 작업 규칙 (모든 작업에 적용)
+alwaysApply: true
+---
+
+작업 전에 @AGENTS.md 와 @docs/05-working-agreement.md, @docs/00-status.md 를 읽고 따른다.
+검색 기능을 건드리면 @docs/06-search-policy.md 를 따른다.

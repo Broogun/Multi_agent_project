@@ -1,0 +1,19 @@
+# 담당 범위별 리뷰어. 팀원 GitHub 아이디가 정해지면 아래 주석을 풀고 채운다 (docs/05 §1 과 같이 고친다).
+# 기본: 저장소 관리자
+*                               @Broogun
+
+# A 검색·에이전트
+# /src/spending_agent/search/   @A_GITHUB_ID
+# /src/spending_agent/agent/    @A_GITHUB_ID
+# /docs/06-search-policy.md     @A_GITHUB_ID @B_GITHUB_ID @C_GITHUB_ID
+
+# B 데이터·평가
+# /src/spending_agent/data/     @B_GITHUB_ID
+# /eval/                        @B_GITHUB_ID
+# /tests/                       @B_GITHUB_ID
+
+# C 화면·연동
+# /app/                         @C_GITHUB_ID
+
+# 작업 규칙은 전원 리뷰
+# /docs/05-working-agreement.md @A_GITHUB_ID @B_GITHUB_ID @C_GITHUB_ID

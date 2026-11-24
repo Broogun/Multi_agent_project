@@ -1,4 +1,0 @@
-pyyaml>=6
-mcp>=2.3,<3
-google-genai>=3.6
-langgraph>=1.2,<2

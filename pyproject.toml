@@ -1,0 +1,29 @@
+[project]
+name = "spending-agent"
+version = "0.1.0"
+description = "목표 지향 소비 관리 에이전트 (Gemini 검색 기반)"
+requires-python = ">=3.12"
+dependencies = [
+    "google-genai>=1.0",
+    "langgraph>=1.0",
+    "python-dotenv>=1.0",
+    "pyyaml>=6",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/spending_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: 실제 외부 API를 부르는 테스트 (CI 제외, 키 필요)"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"

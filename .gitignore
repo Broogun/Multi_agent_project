@@ -1,5 +1,31 @@
+# 비밀값
 .env
+.env.*
+!.env.example
+
+# 개인 에이전트 설정 (공용 규칙은 docs/05-working-agreement.md)
+AGENTS.local.md
+CLAUDE.local.md
+.claude/settings.local.json
+
+# Python
 __pycache__/
-scripts/_probe_out/
-data/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# 데이터·생성물 (data/manual 은 공유)
+data/*
+!data/manual/
+!data/README.md
+out/
+eval/runs/
+
+# 도구
 .archify/
+.serena/
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
