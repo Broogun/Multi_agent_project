@@ -88,7 +88,7 @@ CI는 같은 린트를 실행하고 `uv run pytest -m "not live"`로 실제 API 
 | `app/` | C의 웹 UI |
 | `tests/`, `eval/` | 계약·단위 테스트와 평가 시나리오 |
 | `docs/todo/`, `docs/reports/` | 작업 목록과 결정·완료 기록 |
-| `data/manual/` | 공유하는 수동 규칙 데이터 |
+| `data/` | 로컬 데이터 보관 위치. 안내 문서만 Git에 포함 |
 
 자세한 내용은 [폴더 구조](docs/01-folder-architecture.md), [스펙](docs/02-specs.md), [제품 계획](docs/03-product-plan.md), [용어집](docs/04-glossary.md), [온보딩](docs/07-onboarding.md)을 참고합니다.
 
