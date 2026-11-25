@@ -85,11 +85,13 @@ def pick_model(arg: str | None, models: list[str] | None) -> str:
         return arg
     if os.environ.get("GEMINI_MODEL"):
         return os.environ["GEMINI_MODEL"]
-    for pref in ("gemini-3-flash", "gemini-2.5-flash"):
-        for m in models or []:
-            if m.startswith(pref) and "lite" not in m and "image" not in m and "tts" not in m:
-                return m
-    return "gemini-2.5-flash"
+    # 가장 최신 버전의 일반 flash 모델 (lite·image·preview 제외). 2.5 는 신규 사용자 404 (261125 실험)
+    import re
+    flash = [(tuple(map(int, m.group(1).split("."))), name) for name in (models or [])
+             if (m := re.fullmatch(r"gemini-(\d+(?:\.\d+)?)-flash", name))]
+    if flash:
+        return max(flash)[1]
+    sys.exit("사용할 flash 모델을 찾지 못했습니다. --model 로 지정하세요.")
 
 
 # ---------------------------------------------------------------- E1
