@@ -10,6 +10,8 @@ dependencies = [
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6"]
+# 제공자 검토용 실험 (scripts/gemini_sdk_experiment.py). 설치: uv sync --group experiment
+experiment = ["google-genai>=1.0"]
 
 [build-system]
 requires = ["hatchling"]
