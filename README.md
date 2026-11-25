@@ -29,23 +29,69 @@
 
 **`Policy-Gated Supervisor + Role-Based Specialist Workflows + Verified Feedback + Event-Driven Continuous Care`**
 
+| 구성 | 뜻 |
+|---|---|
+| Policy-Gated Supervisor | 개입 정책(가치·동의·피로도)을 통과할 때만 Supervisor가 전략을 계획·위임 |
+| Role-Based Specialist Workflows | 5개 전문 Worker가 타입이 정해진 Task Contract로 일함 |
+| Verified Feedback | 검증 하네스가 `PASS / NEEDS_INFO / RETRY / REJECT`로 판정하고 실패 사유로 되돌림 |
+| Event-Driven Continuous Care | 거래·일정 이벤트에 반응해 리포트·실행 확인·재계획 |
+
+신규 사용자와 기존 사용자는 **같은 Context Builder로 들어옵니다.** (명세 2장 흐름도)
+
 ```mermaid
-flowchart LR
-    U([👤 신규·기존 사용자]) --> CB[Context Builder]
-    CB --> RE[Reflection / Elicitation<br/>모르는 건 묻는다]
-    RE --> SV{Strategy Supervisor}
-    SV --> W1[계약·구독]
-    SV --> W2[구매비용 비교]
-    SV --> W3[습관·식재료 대체]
-    SV --> W4[교통·혜택]
-    SV --> W5[구매 보류]
-    W1 & W2 & W3 & W4 & W5 --> VE[Validation Engine<br/>계산은 코드가]
-    VE -->|PASS| RP[Recommendation<br/>선택지 0~3개]
-    VE -.->|RETRY / NEEDS_INFO| SV
-    RP --> AP[[✅ 사용자 승인]]
-    AP --> OT[Outcome Tracker]
-    OT --> CC[Continuous Care<br/>주간·월간 리포트]
-    CC -.->|REPLAN| CB
+flowchart TB
+    N["신규 사용자: 목표 / 거래 CSV / 선호 입력"] --> X
+    U["기존 사용자: 신규 거래 / 직접 요청 / 주기 이벤트"] --> EVT["Event Tracker & Scheduler"]
+    EVT --> MON["지속 관리 Orchestrator: 상태 평가"]
+    MON -->|REPLAN 또는 새로운 탐색| X
+    MON -->|REPORT| REP["주간·월간 리포트 생성"]
+    MON -->|FOLLOW_UP| OUT["Outcome Tracking: 실제 실행·비용 변화 확인"]
+    MON -->|NO_ACTION| QUIET["조용한 상태 유지"]
+
+    X["공통 Context Builder: 목표·거래 집계·우선순위·지난 선택"] --> ASK{"추가 정보 / 의사 확인 필요?"}
+    ASK -->|예| REF["Reflection + Elicitation: 최소 질문 / 선호·제약 확인"]
+    REF --> X
+    ASK -->|아니요| POL{"Intervention Policy: 개입 가치·동의·피로도"}
+    POL -->|NO_ACTION| QUIET
+    POL -->|개입 필요| SUP["Strategy Supervisor / Router: 계획·위임"]
+
+    SUP --> TC["Task Contract: 목적·도구·권한·예산·출력 스키마"]
+    TC --> SP1["계약·구독 Worker"]
+    TC --> SP2["구매비용 Worker"]
+    TC --> SP3["습관·식재료 Worker"]
+    TC --> SP4["교통·혜택 Worker"]
+    TC --> SP5["구매 보류 Worker"]
+
+    SP1 --> VAL
+    SP2 --> VAL
+    SP3 --> VAL
+    SP4 --> VAL
+    SP5 --> VAL
+    VAL["검증 하네스: 출처·이용권·조건·순절감액·사용자 적합성"] --> DEC{"검증 상태"}
+    DEC -->|NEEDS_INFO| REF
+    DEC -->|RETRY: 한도 내| SUP
+    DEC -->|REJECT| QUIET
+    DEC -->|PASS| REC["검증된 추천 + 가정·근거·불확실성"]
+    REC --> HITL["사용자 선택: 수락 / 보류 / 거절"]
+    HITL --> ACTION["Recommendation & Action DB: 상태 전이 기록"]
+
+    ACTION --> EVT
+    ACTION --> OUT
+    OUT --> REP
+    OUT --> PROFILE["Long-term Context 업데이트: 목표·선호·실행 이력"]
+    REP --> CARE["Care / Reflection: 비판 없는 요약·응원·다음 행동 제안"]
+    CARE --> PROFILE
+    PROFILE --> EVT
+    PROFILE -.->|다음 재계획에 활용| X
+
+    subgraph GUARD["Shared Agent Harness (모든 실행 단계에 공통 적용)"]
+      H1["E: 실행 루프·한도"]
+      H2["T: Tool 권한·스키마"]
+      H3["C: 최소 컨텍스트"]
+      H4["S: 상태·체크포인트"]
+      H5["L: 사전·사후 훅"]
+      H6["V: 평가·추적"]
+    end
 ```
 
 | | 원칙 |
