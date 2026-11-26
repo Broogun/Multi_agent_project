@@ -10,6 +10,9 @@ dependencies = [
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6"]
+supabase = [
+    "psycopg[binary]>=3.2",
+]
 
 [build-system]
 requires = ["hatchling"]

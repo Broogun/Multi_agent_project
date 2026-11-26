@@ -9,6 +9,7 @@
     uv run python -m spending_agent.demo build P4                         # 온보딩분만
     uv run python -m spending_agent.demo build P4 --through 2026-12-14    # 운영 날짜까지
     uv run python -m spending_agent.demo advance P4                       # 하루 넘기기
+    uv run python -m spending_agent.demo publish                          # Supabase에 올림 (팀 열람용, publish.py)
 
 출력: data/demo/<ID>/ (git 제외, 언제든 재생성). 형식: docs/02-specs.md "통합 거래내역 형식".
 페르소나: personas/<ID>.toml. 가맹점·기관·앱 이름과 금액은 모두 가상의 데모 값이다.
