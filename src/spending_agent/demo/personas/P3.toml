@@ -1,0 +1,471 @@
+# P3 — 29세 직장인 5년차, 경기 본가에서 서울로 장거리 출퇴근 (난이도 Lv2)
+#
+# 얽힌 문제: 전세 자금 적금(월 70만 원)이 필요 월 저축액보다 모자란다. 가장 큰 지출 지렛대는 야근 택시인데,
+# 막차가 끊긴 뒤라 줄이기보다 회사 경비 청구(돌려받기)가 맞는 해법이다. 휴대폰은 약정이 곧 끝나
+# 단말 할부가 빠지고(조언 효과 아님) 요금제 비교 여지가 생긴다. 야근 날 배달도 있다.
+# 제약: 막차 뒤 귀가(안전), PT는 허리 때문에 계속하고 싶다(보호).
+# 함정: 신용카드 대금 출금, PT 3개월 할부(결제는 1건), 연간 결제의 첫 등장(새 월 구독이 아님), 생활비 이체.
+#
+# 입력 경로 B 가정. 가맹점·기관·앱 이름과 금액은 모두 가상의 데모 값이다.
+
+id = "P3"
+user_id = "demo_P3"
+seed = 3
+d0 = 2026-12-01
+history_months = 3
+live_days = 14
+
+[profile]
+gender = "여"
+age = 29
+occupation = "직장인 5년차 (IT 기획)"
+housing = "본가 (경기 용인), 서울 강남으로 광역버스 출퇴근"
+summary = "야근이 잦고 막차가 끊기면 택시로 귀가한다. 부모님께 생활비를 드리고 전세 자금을 모은다."
+
+[sync]
+late_hour = 22
+
+[accounts.bank]
+label = "데모은행 입출금"
+opening_balance = 2400000
+
+[accounts.card]
+label = "데모카드 신용"
+kind = "신용"
+bill_day = 25
+first_bill = 1250000     # 9월 25일 대금 = 8월 사용분 (내역 이전)
+
+[accounts.easypay]
+label = "다람페이"
+money_label = "다람머니"
+opening_balance = 0
+min_charge = 30000
+
+[merchants]
+bus = { name = "한빛교통카드", card_name = "한빛교통(후불)", app_category = ["교통", "대중교통"] }
+taxi = { name = "모두택시", card_name = "모두택시", app_category = ["교통", "택시"] }
+lunch_a = { name = "역삼밥상", card_name = "역삼밥상", app_category = ["식비", "한식"] }
+lunch_b = { name = "포케랩 강남", card_name = "포케랩강남", app_category = ["식비", "양식"] }
+lunch_c = { name = "국밥명가 역삼점", card_name = "국밥명가역삼", app_category = ["식비", "한식"] }
+cafe = { name = "커피온도 역삼점", card_name = "커피온도역삼", app_category = ["카페·간식", "커피"] }
+conv = { name = "늘편의점 역삼점", card_name = "(주)늘리테일 역삼", app_category = ["식비", "편의점"] }
+delivery = { name = "한끼배달", card_name = "한끼배달", app_category = ["식비", "배달"] }
+phone = { name = "새솔모바일", card_name = "새솔모바일(주)", app_category = ["주거·통신", "휴대폰"] }
+insurance = { name = "든든생명", card_name = "든든생명보험(주)", app_category = ["금융", "보험"] }
+pt = { name = "바디핏 PT 용인점", card_name = "바디핏PT용인", app_category = ["문화·여가", "운동"] }
+ott = { name = "씨네박스", card_name = "씨네박스", app_category = ["문화·여가", "OTT"] }
+cloud_pro = { name = "구름드라이브 프로", card_name = "구름드라이브", app_category = ["문화·여가", "구독"] }
+shop_online = { name = "옷장마켓", card_name = "옷장마켓", app_category = ["쇼핑", "의류"] }
+hair = { name = "헤어살롱 모아 수지점", card_name = "헤어살롱모아수지", app_category = ["미용", "헤어"] }
+academy = { name = "모아어학원 강남", card_name = "모아어학원강남", app_category = ["교육", "학원"] }
+dinner = { name = "용인 한우마당", card_name = "용인한우마당", app_category = ["식비", "외식"] }
+
+# ---------------------------------------------------------------- 매달
+[[monthly]]
+id = "salary"
+kind = "transfer_in"
+day = 10
+weekend = "prev_business_day"
+amount = 2500000
+category = "급여"
+hours = [9, 11]
+export = { desc = "급여", category = ["급여", ""] }
+
+[[monthly]]
+id = "living"            # 부모님께 드리는 생활비 (H2)
+kind = "transfer_out"
+day = 11
+amount = 500000
+category = "생활비"
+hours = [9, 13]
+
+[[monthly]]
+id = "saving"            # 전세 자금 적금 (연결 안 된 다른 은행, H3)
+kind = "transfer_out"
+day = 12
+amount = 700000
+category = "저축"
+hours = [9, 12]
+
+[[monthly]]
+id = "phone"             # 89,000원 중 단말 할부가 약 3만 원. 약정이 12/20에 끝난다 (H4)
+kind = "purchase"
+channel = "card"
+merchant = "phone"
+day = 20
+amount = 89000
+category = "통신"
+hours = [6, 8]
+
+[[monthly]]
+id = "insurance"
+kind = "purchase"
+channel = "card"
+merchant = "insurance"
+day = 5
+amount = 62000
+category = "보험"
+hours = [6, 8]
+
+[[monthly]]
+id = "ott"
+kind = "purchase"
+channel = "card"
+merchant = "ott"
+day = 18
+amount = 12900
+category = "구독"
+hours = [0, 3]
+
+[[monthly]]
+id = "academy"           # 퇴근 후 영어 회화 학원
+kind = "purchase"
+channel = "card"
+merchant = "academy"
+day = 3
+amount = 190000
+category = "자기계발"
+hours = [12, 14]
+
+# ---------------------------------------------------------------- 습관 (월~일)
+[[habits]]
+id = "bus"               # 광역버스 왕복
+merchants = ["bus"]
+category = "교통"
+channel = "card"
+prob = [0.95, 0.95, 0.95, 0.95, 0.95, 0.2, 0.1]
+amount = [5400, 6400]
+hours = [7, 8]
+
+[[habits]]
+id = "taxi"              # 야근 뒤 막차가 끊겨 택시 귀가 (밤늦게라 다음 날 들어옴)
+merchants = ["taxi"]
+category = "택시"
+channel = "card"
+prob = [0.22, 0.25, 0.25, 0.22, 0.08, 0.0, 0.0]
+amount = [36000, 52000]
+hours = [22, 24]
+
+[[habits]]
+id = "lunch"
+merchants = ["lunch_a", "lunch_b", "lunch_c"]
+category = "식사"
+channel = "card"
+prob = [0.8, 0.8, 0.8, 0.8, 0.8, 0.0, 0.0]
+amount = [9000, 14000]
+hours = [11, 13]
+
+[[habits]]
+id = "cafe"
+merchants = ["cafe"]
+category = "카페"
+channel = "card"
+prob = [0.55, 0.55, 0.55, 0.55, 0.55, 0.1, 0.1]
+amount = [4500, 6500]
+hours = [13, 16]
+
+[[habits]]
+id = "delivery"          # 야근 날 저녁
+merchants = ["delivery"]
+category = "배달"
+channel = "easypay_card"
+prob = [0.12, 0.12, 0.12, 0.12, 0.05, 0.15, 0.1]
+amount = [16000, 27000]
+hours = [19, 22]
+
+[[habits]]
+id = "conv"
+merchants = ["conv"]
+category = "편의점"
+channel = "card"
+prob = [0.2, 0.2, 0.2, 0.2, 0.2, 0.1, 0.1]
+amount = [2000, 8000]
+hours = [9, 21]
+
+[[habits]]
+id = "family_dinner"     # 주말 가족 외식 (내가 내는 날)
+merchants = ["dinner"]
+category = "외식"
+channel = "card"
+prob = [0.0, 0.0, 0.0, 0.0, 0.0, 0.15, 0.15]
+amount = [60000, 120000]
+hours = [18, 21]
+
+# ---------------------------------------------------------------- 비정기
+[[irregular]]
+id = "shopping"
+merchants = ["shop_online"]
+category = "쇼핑"
+channel = "easypay_card"
+per_month = [0, 2]
+amount = [29000, 99000]
+hours = [20, 24]
+
+[[irregular]]
+id = "hair"
+merchants = ["hair"]
+category = "미용"
+channel = "card"
+per_month = [0, 1]
+amount = [50000, 90000]
+hours = [11, 18]
+
+[[irregular]]
+id = "gift_money"        # 축의금·조의금 계좌이체 (이름 없는 '출금', H7)
+kind = "transfer_out"
+category = "경조사"
+per_month = [0, 2]
+amount = [50000, 100000]
+step = 50000
+hours = [9, 21]
+
+# ---------------------------------------------------------------- 시나리오 이벤트
+[[events]]               # 온보딩 기간: PT 10회 3개월 할부 (보호 지출, H5)
+id = "S_pt_1006"
+at = 2026-10-06T19:30:00
+kind = "purchase"
+channel = "card"
+merchant = "pt"
+amount = 550000
+installment_months = 3
+category = "운동"
+
+[[events]]               # 운영: 야근 택시. 밤늦게라 다음 날 들어오고 R1 기록이 먼저 생긴다
+id = "S_taxi_1201"
+at = 2026-12-01T23:40:00
+kind = "purchase"
+channel = "card"
+merchant = "taxi"
+amount = 47200
+category = "택시"
+
+[[events]]               # 운영: 연간 결제 첫 등장 (매년 12월, H6)
+id = "S_cloud_1208"
+at = 2026-12-08T03:12:00
+kind = "purchase"
+channel = "card"
+merchant = "cloud_pro"
+amount = 59000
+category = "구독"
+
+[[events]]               # 운영: 야근 날 배달 (R4)
+id = "S_deliv_1209"
+at = 2026-12-09T21:10:00
+kind = "purchase"
+channel = "easypay_card"
+merchant = "delivery"
+amount = 23400
+category = "배달"
+
+# ---------------------------------------------------------------- 온보딩: 기초 고정 질의 답변
+[onboarding.fixed_answers]
+goal = { name = "전세 보증금", amount = 30000000, deadline = 2027-12-31, current_saved = 18000000 }
+income = "월급이요, 10일에 들어와요"
+housing = "본가 살아요. 부모님께 생활비 드려요"
+protected = ["PT (허리 때문에 해요)"]
+concern = "택시비가 너무 나와요"
+
+# ---------------------------------------------------------------- 숨은 사실
+[[hidden_facts]]
+id = "H1"
+topic = "평일 밤 택시"
+fact = "광역버스 막차가 22:40이라 야근하면 택시밖에 없다. 회사 규정상 23시 이후 퇴근 택시비는 경비 청구가 되는데 귀찮아서 안 했다."
+answer = "막차가 10시 40분이라 야근하면 택시밖에 없어요. 회사에서 11시 넘으면 청구하라고는 하는데 귀찮아서 안 했어요."
+
+[[hidden_facts]]
+id = "H2"
+topic = "11일 50만 원 출금"
+fact = "본가에 사는 대신 부모님께 드리는 생활비."
+answer = "부모님 생활비 드리는 거예요."
+
+[[hidden_facts]]
+id = "H3"
+topic = "12일 70만 원 출금"
+fact = "전세 자금 적금 (다른 은행)."
+answer = "전세 자금 적금이에요."
+
+[[hidden_facts]]
+id = "H4"
+topic = "휴대폰 요금 89,000원"
+fact = "약정이 12/20에 끝나고 단말 할부(약 3만 원)도 같이 끝난다. 데이터 무제한 요금제를 쓰는데 실제로는 출퇴근에 영상 보는 정도다."
+answer = "약정이 이번 달 20일에 끝나요. 데이터는 버스에서 영상 보는 정도예요."
+
+[[hidden_facts]]
+id = "H5"
+topic = "10월 PT 55만 원 (3개월 할부)"
+fact = "허리 때문에 시작했고 계속하고 싶다. 이번 회차가 12월에 끝난다."
+answer = "허리 때문에 하는 거라 계속하고 싶어요. 12월에 끝나서 재등록 고민 중이에요."
+
+[[hidden_facts]]
+id = "H6"
+topic = "12/8 구름드라이브 프로 59,000원"
+fact = "작년 12월에 연간 결제로 바꿔둔 걸 잊고 있었다. 사진 백업용으로 계속 쓴다."
+answer = "아 그거 작년에 연간으로 바꿨던 거네요. 사진 백업이라 쓰긴 해요."
+
+[[hidden_facts]]
+id = "H7"
+topic = "가끔 나가는 5만·10만 원 출금"
+fact = "친구·회사 동료 축의금과 조의금."
+answer = "그건 축의금이에요. 요즘 결혼하는 친구가 많아서요."
+
+# ---------------------------------------------------------------- 얽힌 문제
+[[problems]]
+id = "taxi"
+side = "지출"
+title = "야근 택시 (지출 지렛대 중 가장 큼)"
+lever = { kind = "spend", category = "택시" }
+facts = ["H1"]
+constraints = ["막차 뒤 귀가: 안전 문제라 '타지 말라'는 답이 아님", "H1: 23시 이후는 경비 청구 가능 → 줄이지 않고 돌려받기"]
+
+[[problems]]
+id = "delivery"
+side = "지출"
+title = "야근 날 저녁 배달"
+lever = { kind = "spend", category = "배달" }
+
+[[problems]]
+id = "phone"
+side = "지출"
+title = "휴대폰 약정 종료 후 요금"
+facts = ["H4"]
+note = "단말 할부가 빠지는 건 조언 효과가 아니다. 요금제 비교는 사용자가 확인한 요금으로만 계산한다"
+
+[[problems]]
+id = "saving_gap"
+side = "목표"
+title = "전세 적금 월 70만 원 vs 필요 월 저축액"
+facts = ["H3"]
+constraints = ["PT는 보호 지출 (H5)"]
+note = "부족분 = facts.goal.monthly_required − 월 적금 700,000"
+
+# ---------------------------------------------------------------- 운영: 유저 기록
+[[records]]
+id = "R1"
+written_at = 2026-12-02T08:30:00
+about = "S_taxi_1201"
+text = "어제도 야근하고 택시. 47,200원"
+amount = 47200
+
+[[records]]
+id = "R2"
+written_at = 2026-12-09T09:00:00
+about = "S_cloud_1208"
+text = "구름드라이브 59,000원? 이게 뭐지"
+
+[[records]]
+id = "R3"
+written_at = 2026-12-10T19:00:00
+text = "PT 이번 달로 끝나는데 재등록할까 고민"
+
+[[records]]
+id = "R4"
+written_at = 2026-12-11T08:00:00
+about = "S_deliv_1209"
+text = "야근하고 너무 배고파서 배달"
+
+# ---------------------------------------------------------------- 평가 케이스
+[[cases]]
+id = "P3-C01"
+phase = "onboarding"
+level = 2
+target = "data"
+signal = "매달 25일 '데모카드 신용 결제대금' 이체"
+expect = ["카드대금 이체는 지출에서 뺀다", "대금에는 PT 할부 회차가 들어 있다고 본다"]
+must_not = ["카드대금을 결제와 함께 지출로 더한다"]
+why = "truth.facts.card_bills"
+
+[[cases]]
+id = "P3-C02"
+phase = "onboarding"
+level = 2
+target = "data"
+signal = "10월 PT 550,000원 '할부 3개월' 결제 행 1건"
+expect = ["결제는 1건(10월 전액)이고, 현금흐름은 3개월에 나뉜다고 본다"]
+must_not = ["PT를 매달 반복 결제로 본다", "10월 지출 급증을 추세로 본다"]
+why = "truth.facts.installments"
+
+[[cases]]
+id = "P3-C03"
+phase = "onboarding"
+level = 2
+target = "agent"
+signal = "11일 50만 원 이름 없는 출금"
+expect = ["고정 답변(생활비 드림)과 맞춰 확인한다 (H2)"]
+must_not = ["생활비를 줄일 지출로 제안한다"]
+why = "가족 생활비는 유저 결정 영역"
+
+[[cases]]
+id = "P3-C04"
+phase = "onboarding"
+level = 3
+target = "agent"
+composite = true
+signal = "전세 적금이 필요 월 저축액보다 모자람"
+expect = [
+  "부족분을 계산 결과로 말한다",
+  "가장 큰 지렛대인 택시는 '경비 청구로 돌려받기'(H1)를 먼저 낸다",
+  "배달, 약정 종료 후 요금제 비교(사용자 확인 요금)를 크기 순으로 함께 낸다",
+  "PT(보호)는 줄일 대상에서 뺀다",
+]
+must_not = ["막차가 끊긴 뒤에도 대중교통을 타라고 한다", "PT를 줄이라고 한다", "약정 종료로 빠지는 단말 할부를 조언 효과로 센다"]
+why = "facts.goal.monthly_required, facts.levers.taxi/delivery, H1, H4, H5"
+
+[[cases]]
+id = "P3-C05"
+phase = "live"
+level = 3
+target = "data+agent"
+signal = "R1: 거래가 들어오기 전에 쓴 택시 기록 (다음 날 들어옴)"
+expect = ["다음 날 들어온 택시 결제와 기록을 연결한다", "23시 이후라 경비 청구 대상일 수 있다고 알린다 (H1)"]
+must_not = ["기록 금액과 결제를 두 번 센다"]
+why = "R1 transaction_id = null (truth.facts.records)"
+
+[[cases]]
+id = "P3-C06"
+phase = "live"
+level = 2
+target = "agent"
+signal = "R2: 12/8 처음 보는 구름드라이브 프로 59,000원"
+expect = ["처음 등장한 결제라 정체를 묻는다 (H6)", "연간 결제라면 월 환산액은 계산 결과로 말한다"]
+must_not = ["새 월 구독이 생겼다고 단정한다", "매달 59,000원이 나간다고 계산한다"]
+why = "온보딩 기간에 구름드라이브 행이 없다"
+
+[[cases]]
+id = "P3-C07"
+phase = "live"
+level = 2
+target = "agent"
+signal = "R3: PT 재등록 고민 (거래 없는 기록)"
+expect = ["목표 영향은 계산 결과로만 보여주고, 결정은 유저에게 맡긴다", "허리 때문이라는 맥락(H5)을 존중한다"]
+must_not = ["재등록하지 말라고 한다"]
+why = "보호 지출"
+
+[[cases]]
+id = "P3-C08"
+phase = "onboarding"
+level = 2
+target = "agent"
+signal = "휴대폰 89,000원 + 약정 12/20 종료 (H4)"
+expect = ["약정 종료 후 요금제를 비교해 볼 수 있다고 제안한다 (요금은 사용자 확인 값)"]
+must_not = ["검색 결과 요금으로 절감액을 계산한다", "단말 할부가 빠지는 걸 절감 성과로 센다"]
+why = "docs/06, H4"
+
+[[cases]]
+id = "P3-C10"
+phase = "onboarding"
+level = 2
+target = "agent"
+signal = "가끔 나가는 5만·10만 원 이름 없는 출금"
+expect = ["용도를 묻는다 (H7)", "경조사비는 줄일 대상으로 몰지 않는다"]
+must_not = ["이름 없는 출금을 소비 절감 대상으로 단정한다"]
+why = "은행 적요에 상대 이름이 없다는 가정"
+
+[[cases]]
+id = "P3-C09"
+phase = "live"
+level = 1
+target = "agent"
+signal = "기록이 없는 날"
+expect = ["내역만 쌓고 분석·피드백을 만들지 않는다"]
+must_not = ["기록 없이 먼저 피드백을 보낸다"]
+why = "운영 단계 분석은 유저 기록이 들어올 때 시작한다"

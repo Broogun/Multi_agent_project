@@ -32,7 +32,8 @@ Multi_agent_project/
 │  ├─ fakes.py               # 가짜 구현 (다른 담당 코드가 없을 때 개발용)
 │  ├─ search/                # A: 검색 모듈 자리 (제공자 미정, 결과는 UI로만)
 │  ├─ agent/                 # A: 에이전트 흐름 (LangGraph)
-│  └─ data/                  # B: 사용자 데이터·계산
+│  ├─ data/                  # B: 사용자 데이터·계산
+│  └─ demo/                  # C: 데모 거래 생성기 (통합 거래내역, personas/*.toml)
 ├─ app/                      # C: 웹 UI
 ├─ tests/                    # pytest (가짜 LLM, 네트워크 없음)
 ├─ eval/                     # B: 평가셋·채점 기록
