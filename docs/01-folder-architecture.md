@@ -23,6 +23,7 @@ Multi_agent_project/
 │  ├─ 05-working-agreement.md # 작업 규칙 (먼저 읽기)
 │  ├─ 06-search-policy.md    # 검색 API 사용 원칙 (약관·저장·표시)
 │  ├─ 07-onboarding.md       # 팀원 첫날 30분
+│  ├─ 08-demo-data.md        # 데모 데이터 안내 (페르소나·위치·사용 규칙)
 │  ├─ todo/                  # 할 일 (00-todo-list.md + 상세 파일)
 │  ├─ reports/               # 결정·완료 기록 (YYMMDD-HHMM-이니셜-slug.md)
 │  └─ learning/              # 학습 문서 (참고용)
