@@ -35,6 +35,8 @@ main 에 push 하거나 PR 을 merge 하지는 마.
 4. 승인 + CI 통과 → Squash merge
 
 ## 5. 데모 데이터 보기
+무엇이 들어 있고 누가 무엇을 써도 되는지는 [08 데모 데이터 안내](08-demo-data.md).
+
 - 내 PC에서 만들기: `uv run python -m spending_agent.demo build P4` → `data/demo/P4/` (같은 명령이면 누구나 같은 데이터)
 - 공유 DB(Supabase)에서 보기: 팀 Supabase 프로젝트에 초대받은 뒤 대시보드 **Table Editor**에서 스키마 `demo`(거래·기록)와 `demo_eval`(평가 정답)을 고른다. 코드로 읽으려면 연결 문자열을 DM으로 받아 `.env`의 `SUPABASE_DB_URL`에 넣는다
 - 올리기 (담당자만, 처음 한 번 설정):
