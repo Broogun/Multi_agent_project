@@ -12,4 +12,5 @@
 | 대기 | 계산 함수 3개 + 사용자 확인 가격 저장 | B parky2won | [calc-core](calc-core.md) |
 | 대기 | 평가 시나리오 10개 + 채점 스크립트 | B parky2won | [eval-scenarios](eval-scenarios.md) |
 | 대기 | 웹 UI: 채팅 + 검색 창 + 가격 입력 | C KIM-YUNHO | [web-ui](web-ui.md) |
+| 진행 | 데모 사용자 거래 데이터 5명 (P1~P5 초안, 팀 확인 대기) | C KIM-YUNHO | [demo-data](demo-data.md) |
 | 대기 | 시연 시나리오 문서 | C KIM-YUNHO | |

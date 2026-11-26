@@ -1,0 +1,465 @@
+# P5 — 26세 신입 4개월 차, 원룸 월세 (난이도 Lv3)
+#
+# 얽힌 문제: 비상금 목표에 월 40만 원대가 필요한데 저축 습관이 아직 없다. 월급 직후 쇼핑이 몰리고(반품이 잦아
+# 결제 총액과 순지출 차이가 큼), 배달도 잦다. 노트북 12개월 할부는 줄일 수 없는 고정 지출이라 여유를 줄인다.
+# 해지했다고 생각한 구독이 계속 결제된다. 지출 지렛대는 쇼핑·배달을 전부 끊어야 겨우 필요액에 닿는 크기라
+# 현실적이지 않다. 그래서 '월급날 먼저 떼어 두기'와 목표 시점 조정(목표 쪽)을 함께 봐야 한다.
+# 제약: 금요일 친구들과 한잔은 지키고 싶다(보호), 첫 직장 스트레스 풀이로 쇼핑을 한다.
+# 함정: 반품 취소 행, 노트북 할부(9월 1건 전액), 신용카드 대금 출금, 이름 없는 월세·부모님 용돈 이체.
+#
+# 입력 경로 B 가정. 가맹점·기관·앱 이름과 금액은 모두 가상의 데모 값이다.
+
+id = "P5"
+user_id = "demo_P5"
+seed = 14                # 1~40 중 월급 직후 쇼핑 몰림·잦은 반품·월 수지 0 근처가 함께 보이는 표본
+d0 = 2026-12-01
+history_months = 3
+live_days = 14
+
+[profile]
+gender = "남"
+age = 26
+occupation = "신입 사원 4개월 차 (영업지원)"
+housing = "자취 (원룸 월세)"
+summary = "8월 입사. 월급이 들어오면 그 주에 옷·신발을 몰아서 사고 자주 반품한다. 저축 통장이 없다."
+
+[sync]
+late_hour = 22
+
+[accounts.bank]
+label = "데모은행 입출금"
+opening_balance = 1300000  # 8월 25일 첫 월급의 남은 돈
+
+[accounts.card]
+label = "데모카드 신용"
+kind = "신용"            # 입사하고 처음 만든 신용카드
+bill_day = 12
+first_bill = 420000      # 9월 12일 대금 = 8월 사용분 (내역 이전)
+
+[accounts.easypay]
+label = "다람페이"
+money_label = "다람머니"
+opening_balance = 0
+min_charge = 30000
+
+[merchants]
+shop_a = { name = "스타일랩", card_name = "(주)스타일랩", app_category = ["쇼핑", "의류"] }
+shop_b = { name = "모두의신발", card_name = "모두의신발", app_category = ["쇼핑", "신발"] }
+shop_c = { name = "옷장마켓", card_name = "옷장마켓", app_category = ["쇼핑", "의류"] }
+electronics = { name = "디지털마트 온라인", card_name = "(주)디지털마트", app_category = ["쇼핑", "가전·디지털"] }
+lunch_a = { name = "봉천밥상", card_name = "봉천밥상", app_category = ["식비", "한식"] }
+lunch_b = { name = "돈까스공방 구로점", card_name = "돈까스공방구로", app_category = ["식비", "일식"] }
+cafe = { name = "블루밀 구로디지털점", card_name = "블루밀(구로디지털)", app_category = ["카페·간식", "커피"] }
+conv = { name = "늘편의점 봉천점", card_name = "(주)늘리테일 봉천", app_category = ["식비", "편의점"] }
+delivery = { name = "한끼배달", card_name = "한끼배달", app_category = ["식비", "배달"] }
+pub = { name = "포차 샤로수길", card_name = "포차샤로수길", app_category = ["식비", "술집"] }
+eatout = { name = "샤로수길 파스타", card_name = "샤로수길파스타", app_category = ["식비", "양식"] }
+taxi = { name = "모두택시", card_name = "모두택시", app_category = ["교통", "택시"] }
+transit = { name = "한빛교통카드", card_name = "한빛교통(후불)", app_category = ["교통", "대중교통"] }
+phone = { name = "새솔모바일", card_name = "새솔모바일(주)", app_category = ["주거·통신", "휴대폰"] }
+gym = { name = "바디핏 헬스 봉천점", card_name = "바디핏헬스봉천", app_category = ["문화·여가", "운동"] }
+ott = { name = "무비온", card_name = "무비온", app_category = ["문화·여가", "OTT"] }
+
+# ---------------------------------------------------------------- 매달
+[[monthly]]
+id = "salary"
+kind = "transfer_in"
+day = 25
+weekend = "prev_business_day"
+amount = 2200000
+category = "급여"
+hours = [9, 11]
+export = { desc = "급여", category = ["급여", ""] }
+
+[[monthly]]
+id = "rent"
+kind = "transfer_out"
+day = 1
+amount = 550000
+category = "주거"
+hours = [9, 20]
+
+[[monthly]]
+id = "parents"           # 부모님 용돈 (이름 없는 '출금', H8)
+kind = "transfer_out"
+day = 26
+amount = 200000
+category = "부모님 용돈"
+hours = [9, 21]
+
+[[monthly]]
+id = "phone"
+kind = "purchase"
+channel = "card"
+merchant = "phone"
+day = 18
+amount = 55000
+category = "통신"
+hours = [6, 8]
+
+[[monthly]]
+id = "gym"
+kind = "purchase"
+channel = "card"
+merchant = "gym"
+day = 2
+amount = 39000
+category = "운동"
+hours = [6, 8]
+
+[[monthly]]
+id = "ott"               # 11월 초에 해지했다고 생각하지만 계속 결제된다 (H4)
+kind = "purchase"
+channel = "card"
+merchant = "ott"
+day = 9
+amount = 13500
+category = "구독"
+hours = [0, 3]
+
+# ---------------------------------------------------------------- 습관 (월~일)
+[[habits]]
+id = "shopping"          # 월급(25일) 직후 일주일과 월초에 몰린다. 반품이 잦다 (H1, H2)
+merchants = ["shop_a", "shop_b", "shop_c"]
+category = "쇼핑"
+channels = { easypay_card = 0.7, card = 0.3 }
+prob = [0.06, 0.06, 0.06, 0.06, 0.06, 0.06, 0.06]
+amount = [29000, 129000]
+hours = [12, 24]
+boosts = [
+  { days_of_month = [25, 31], factor = 7.0 },
+  { days_of_month = [1, 3], factor = 5.0 },
+]
+cancel_prob = 0.3
+cancel_delay = [2, 7]
+
+[[habits]]
+id = "lunch"
+merchants = ["lunch_a", "lunch_b"]
+category = "식사"
+channel = "card"
+prob = [0.85, 0.85, 0.85, 0.85, 0.85, 0.0, 0.0]
+amount = [8000, 12000]
+hours = [11, 13]
+
+[[habits]]
+id = "cafe"
+merchants = ["cafe"]
+category = "카페"
+channel = "card"
+prob = [0.45, 0.45, 0.45, 0.45, 0.45, 0.1, 0.1]
+amount = [4300, 6000]
+hours = [8, 10]
+
+[[habits]]
+id = "conv"
+merchants = ["conv"]
+category = "편의점"
+channel = "card"
+prob = [0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4]
+amount = [2000, 9000]
+hours = [18, 24]
+
+[[habits]]
+id = "delivery"
+merchants = ["delivery"]
+category = "배달"
+channels = { easypay_card = 0.7, easypay_balance = 0.3 }
+prob = [0.18, 0.18, 0.18, 0.18, 0.3, 0.35, 0.3]
+amount = [16000, 28000]
+hours = [19, 23]
+
+[[habits]]
+id = "pub"               # 금요일 친구들과 한잔 (보호)
+merchants = ["pub"]
+category = "외식"
+channel = "card"
+prob = [0.0, 0.0, 0.0, 0.05, 0.45, 0.35, 0.0]
+amount = [30000, 70000]
+hours = [20, 24]
+
+[[habits]]
+id = "eatout"
+merchants = ["eatout"]
+category = "외식"
+channel = "card"
+prob = [0.0, 0.0, 0.0, 0.0, 0.0, 0.35, 0.35]
+amount = [15000, 45000]
+hours = [12, 20]
+
+[[habits]]
+id = "taxi"              # 술자리 뒤 귀가
+merchants = ["taxi"]
+category = "택시"
+channel = "card"
+prob = [0.0, 0.0, 0.0, 0.0, 0.3, 0.3, 0.0]
+amount = [12000, 25000]
+hours = [23, 24]
+
+[[habits]]
+id = "transit"
+merchants = ["transit"]
+category = "교통"
+channel = "card"
+prob = [0.95, 0.95, 0.95, 0.95, 0.95, 0.2, 0.1]
+amount = [3100, 3100]
+hours = [7, 9]
+
+# ---------------------------------------------------------------- 시나리오 이벤트
+[[events]]               # 온보딩 기간: 노트북 12개월 할부 (일회성, H3)
+id = "S_laptop_0927"
+at = 2026-09-27T14:20:00
+kind = "purchase"
+channel = "card"
+merchant = "electronics"
+amount = 1890000
+installment_months = 12
+category = "전자기기"
+
+[[events]]               # 운영: 월초 신발 (밤늦게라 다음 날 들어옴, R1)
+id = "S_shop_1201"
+at = 2026-12-01T22:40:00
+kind = "purchase"
+channel = "card"
+merchant = "shop_b"
+amount = 89000
+category = "쇼핑"
+
+[[events]]               # 운영: 패딩 (R2)
+id = "S_shop_1206"
+at = 2026-12-06T21:30:00
+kind = "purchase"
+channel = "easypay_card"
+merchant = "shop_a"
+amount = 129000
+category = "쇼핑"
+
+# ---------------------------------------------------------------- 온보딩: 기초 고정 질의 답변
+[onboarding.fixed_answers]
+goal = { name = "비상금", amount = 3000000, deadline = 2027-05-31, current_saved = 400000 }
+income = "월급이요. 25일"
+housing = "원룸 월세요"
+protected = ["금요일에 친구들이랑 한잔"]
+concern = "월급이 어디로 가는지 모르겠어요"
+
+# ---------------------------------------------------------------- 숨은 사실
+[[hidden_facts]]
+id = "H1"
+topic = "월급 직후 쇼핑이 몰림"
+fact = "월급이 들어오면 그 주에 옷·신발을 몰아서 산다. 첫 직장이라 스트레스 풀이 겸이다."
+answer = "월급 들어오면 그 주에 좀 사요... 회사 스트레스 풀 데가 없어서요."
+
+[[hidden_facts]]
+id = "H2"
+topic = "잦은 반품"
+fact = "사이즈가 안 맞거나 비슷한 게 있으면 반품한다. 자주 그런다."
+answer = "사이즈 안 맞으면 반품해요. 꽤 자주요."
+
+[[hidden_facts]]
+id = "H3"
+topic = "9월 노트북 189만 원 (12개월 할부)"
+fact = "업무·개인용으로 9월에 12개월 할부로 샀다. 일회성이다."
+answer = "노트북 할부예요. 일 때문에 샀어요."
+
+[[hidden_facts]]
+id = "H4"
+topic = "12/9 무비온 결제"
+fact = "11월 초에 앱에서 해지했다고 생각했다. 해지가 실제로 끝났는지는 확인하지 않았다."
+answer = "어? 그거 11월에 해지했는데요?"
+
+[[hidden_facts]]
+id = "H5"
+topic = "1일 55만 원 출금"
+fact = "월세."
+answer = "월세예요."
+
+[[hidden_facts]]
+id = "H6"
+topic = "저축"
+fact = "적금이나 비상금 통장이 없다. 월급이 들어오면 그냥 입출금 통장에 둔다."
+answer = "따로 모으는 통장은 없어요. 그냥 두면 남는 줄 알았어요."
+
+[[hidden_facts]]
+id = "H7"
+topic = "비상금 목표 시점"
+fact = "5월이 꼭 마감은 아니다. 금액(300만 원)은 지키고 싶고, 연말까지 모아도 괜찮다."
+answer = "5월은 그냥 정한 거예요. 300만 원은 꼭 모으고 싶은데 연말까지 가도 괜찮아요."
+
+[[hidden_facts]]
+id = "H8"
+topic = "26일 20만 원 출금"
+fact = "부모님께 드리는 용돈. 입사하고 시작했다."
+answer = "부모님 용돈 드려요. 취업하고부터요."
+
+# ---------------------------------------------------------------- 얽힌 문제
+[[problems]]
+id = "payday_shopping"
+side = "지출"
+title = "월급 직후 몰리는 쇼핑 (반품을 뺀 순지출 기준)"
+lever = { kind = "spend", category = "쇼핑" }
+facts = ["H1", "H2"]
+constraints = ["H1: 스트레스 풀이 → 끊기보다 '보류 규칙' 같은 완충이 현실적"]
+
+[[problems]]
+id = "delivery"
+side = "지출"
+title = "배달"
+lever = { kind = "spend", category = "배달" }
+
+[[problems]]
+id = "zombie_subscription"
+side = "지출"
+title = "해지했다고 생각한 구독이 계속 결제됨"
+lever = { kind = "spend", category = "구독" }
+facts = ["H4"]
+
+[[problems]]
+id = "installment"
+side = "지출"
+title = "노트북 12개월 할부 (고정)"
+facts = ["H3"]
+note = "줄일 수 있는 지렛대가 아니라 남은 기간 고정으로 나가는 돈. 여유 계산에서 빼야 한다 (facts.installments)"
+
+[[problems]]
+id = "pay_yourself_first"
+side = "목표"
+title = "월급날 먼저 떼어 두기 (자동이체)"
+facts = ["H6"]
+
+[[problems]]
+id = "goal_flex"
+side = "목표"
+title = "목표 시점 조정 (금액은 유지, 연말까지)"
+facts = ["H7"]
+
+# ---------------------------------------------------------------- 운영: 유저 기록
+[[records]]
+id = "R1"
+written_at = 2026-12-03T08:00:00
+about = "S_shop_1201"
+text = "신발 또 샀다. 월급 받고 일주일 동안 계속 사는 듯"
+
+[[records]]
+id = "R2"
+written_at = 2026-12-07T10:00:00
+about = "S_shop_1206"
+text = "패딩 샀는데 비슷한 거 있긴 함"
+
+[[records]]
+id = "R3"
+written_at = 2026-12-10T08:30:00
+about = "ott-202612"
+text = "어? 무비온 해지했는데 왜 결제됐지"
+
+[[records]]
+id = "R4"
+written_at = 2026-12-13T11:00:00
+about = "card_bill-202612"
+text = "카드값 왜 이렇게 많아"
+
+# ---------------------------------------------------------------- 평가 케이스
+[[cases]]
+id = "P5-C01"
+phase = "onboarding"
+level = 2
+target = "data"
+signal = "쇼핑 결제 뒤 며칠 지나 '(취소)' 환불 행이 자주 나옴"
+expect = ["환불을 원래 결제와 묶어 순지출로 본다"]
+must_not = ["결제 총액으로 쇼핑비를 말한다", "환불을 수입으로 본다"]
+why = "truth.facts.cancels"
+
+[[cases]]
+id = "P5-C02"
+phase = "onboarding"
+level = 2
+target = "data"
+signal = "9월 노트북 1,890,000원 '할부 12개월' 결제 행 1건"
+expect = ["일회성 큰 결제로 따로 보고, 카드대금에 회차가 나뉘어 들어간다고 본다"]
+must_not = ["9월 쇼핑·지출 급증을 추세로 본다"]
+why = "truth.facts.installments"
+
+[[cases]]
+id = "P5-C03"
+phase = "onboarding"
+level = 3
+target = "agent"
+signal = "월급일(25일) 직후와 월초에 쇼핑이 몰림"
+expect = ["날짜 분포를 계산 결과로 보여주고 이유를 묻는다 (H1)", "비난 없이 말한다"]
+must_not = ["쇼핑을 끊으라고 한다"]
+why = "shopping boosts (days_of_month)"
+
+[[cases]]
+id = "P5-C04"
+phase = "onboarding"
+level = 3
+target = "agent"
+composite = true
+signal = "비상금 목표: 필요 월 저축액이 크고 저축 통장이 없음"
+expect = [
+  "필요 월 저축액과 할부를 뺀 실제 여유를 계산 결과로 말한다",
+  "지출 지렛대(쇼핑 순지출, 배달, 해지 안 된 구독)를 크기 순으로 내되, 전부 끊어야 겨우 닿는 수준이라 현실적이지 않다고 짚는다",
+  "월급날 먼저 떼어 두기(H6)와 목표 시점 조정(H7)을 함께 낸다",
+  "금요일 한잔(보호)은 줄일 대상에서 뺀다",
+]
+must_not = ["노트북 할부를 줄일 수 있는 지출로 본다", "선택지를 4개 이상 늘어놓는다", "부모님 용돈을 줄일 지출로 제안한다"]
+why = "facts.goal.monthly_required, facts.levers, facts.installments"
+
+[[cases]]
+id = "P5-C05"
+phase = "live"
+level = 2
+target = "agent"
+signal = "R1: 신발 또 샀다는 기록 (거래는 다음 날 들어옴)"
+expect = ["'장바구니에 두고 이틀 뒤 결정' 같은 보류 규칙을 선택지로 낸다", "결정은 유저에게 맡긴다"]
+must_not = ["비난한다"]
+why = "H1"
+
+[[cases]]
+id = "P5-C06"
+phase = "live"
+level = 2
+target = "agent"
+signal = "R2: 패딩 샀는데 비슷한 게 있다는 기록"
+expect = ["반품 가능 기간인지 확인해 보라고 제안할 수 있다"]
+must_not = ["검색 결과 가격으로 비교·절감액을 계산한다", "반품을 강요한다"]
+why = "docs/06, H2"
+
+[[cases]]
+id = "P5-C07"
+phase = "live"
+level = 2
+target = "agent"
+signal = "R3: 해지했다는 구독이 12/9에 또 결제됨"
+expect = ["서비스에서 해지 상태를 직접 확인해 보라고 안내한다", "11월에도 결제됐는지 내역으로 확인해 준다"]
+must_not = ["서비스 오류라고 단정한다", "환불을 보장한다"]
+why = "monthly ott 가 9~12월 모두 결제됨, H4"
+
+[[cases]]
+id = "P5-C08"
+phase = "live"
+level = 2
+target = "data+agent"
+signal = "R4: 카드값이 많다는 기록"
+expect = ["대금 구성(일시불 + 노트북 할부 회차 − 취소)을 계산식과 함께 설명한다"]
+must_not = ["대금을 12월 지출에 또 더한다", "LLM이 대금 구성을 직접 계산한다"]
+why = "truth.facts.card_bills[2026-12].calc"
+
+[[cases]]
+id = "P5-C09"
+phase = "onboarding"
+level = 1
+target = "agent"
+signal = "1일 55만 원 이름 없는 출금"
+expect = ["고정 답변(원룸 월세)과 맞춰 확인한다 (H5)"]
+must_not = ["월세를 줄일 지출로 제안한다"]
+why = "은행 적요에 상대 이름이 없다는 가정"
+
+[[cases]]
+id = "P5-C10"
+phase = "live"
+level = 1
+target = "agent"
+signal = "기록이 없는 날"
+expect = ["내역만 쌓고 분석·피드백을 만들지 않는다"]
+must_not = ["기록 없이 먼저 피드백을 보낸다"]
+why = "운영 단계 분석은 유저 기록이 들어올 때 시작한다"
