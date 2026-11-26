@@ -90,11 +90,18 @@ def main(argv: list[str] | None = None) -> None:
     a = sub.add_parser("advance", help="운영 하루 넘기기 (그날 새 거래 + 유저 기록)")
     a.add_argument("persona")
     a.add_argument("--days", type=int, default=1)
+    s = sub.add_parser("publish", help="Supabase(Postgres)에 올림: 팀 열람용, .env 의 SUPABASE_DB_URL 사용")
+    s.add_argument("personas", nargs="*", help="비우면 전체")
+    s.add_argument("--reset", action="store_true", help="demo·demo_eval 스키마를 지우고 다시 만든다")
     args = parser.parse_args(argv)
     if args.cmd == "build":
         build(args.persona, args.through)
-    else:
+    elif args.cmd == "advance":
         advance(args.persona, args.days)
+    else:
+        from .publish import publish  # psycopg 는 선택 설치라 여기서만 불러온다
+        for pid, counts in publish(args.personas, args.reset).items():
+            print(f"{pid} 올림: " + " · ".join(f"{t} {n}건" for t, n in counts.items()))
 
 
 if __name__ == "__main__":

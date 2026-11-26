@@ -34,7 +34,16 @@ main 에 push 하거나 PR 을 merge 하지는 마.
 3. `git push -u origin <브랜치>` → GitHub 에서 PR 생성 → 템플릿 체크 → 리뷰어 지정 (05 §1 표)
 4. 승인 + CI 통과 → Squash merge
 
-## 5. 막히면
+## 5. 데모 데이터 보기
+- 내 PC에서 만들기: `uv run python -m spending_agent.demo build P4` → `data/demo/P4/` (같은 명령이면 누구나 같은 데이터)
+- 공유 DB(Supabase)에서 보기: 팀 Supabase 프로젝트에 초대받은 뒤 대시보드 **Table Editor**에서 스키마 `demo`(거래·기록)와 `demo_eval`(평가 정답)을 고른다. 코드로 읽으려면 연결 문자열을 DM으로 받아 `.env`의 `SUPABASE_DB_URL`에 넣는다
+- 올리기 (담당자만, 처음 한 번 설정):
+  1. Supabase 프로젝트를 만들고 DB 비밀번호를 따로 보관한다 (대시보드에서 다시 볼 수 없다)
+  2. 대시보드 상단 **Connect → Session pooler**의 `postgresql://` 연결 문자열을 복사해 (프로젝트 API 키·`https://` URL이 아니다) 비밀번호를 채우고 `?sslmode=require`를 붙여 `.env`의 `SUPABASE_DB_URL`에 넣는다 (비밀번호의 `&`, `#`, `?`, 공백 등은 퍼센트 인코딩)
+  3. `uv sync --group dev --group supabase` → `uv run python -m spending_agent.demo publish`
+- `demo_eval`(정답)은 평가할 때만 본다. 에이전트 입력에 넣지 않는다
+
+## 6. 막히면
 - 다른 사람 코드가 아직 없으면 `src/spending_agent/fakes.py` 의 가짜 구현으로 계속 진행한다.
 - 계약(contracts.py)을 바꿔야 하면 혼자 바꾸지 말고 이슈를 열어 3명이 합의한다.
 - 결정이 필요하면 `docs/00-status.md` 의 "열린 질문"에 한 줄 추가하고 팀 채널에 알린다.

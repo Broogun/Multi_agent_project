@@ -86,6 +86,23 @@
 
 형식이 정해지면 `contracts.py`에 TypedDict로 옮긴다 (3명 합의).
 
+## 데모 데이터 공유 (Supabase, 열람용)
+
+팀원끼리 같은 데모 데이터를 보기 위한 공유 DB다. **앱 저장 형식이 아니다** (사용자 데이터 저장 형식은 B가 정하고, 계획은 SQLite 그대로). `uv run python -m spending_agent.demo publish`가 [`schema.sql`](../src/spending_agent/demo/schema.sql)을 실행한 뒤 페르소나별로 지우고 다시 넣는다. 보는 법은 [07 §5](07-onboarding.md).
+
+| 스키마 | 테이블 | 내용 |
+|---|---|---|
+| `demo` | `personas` | 프로필 요약, D0, 온보딩·운영 기간 |
+| `demo` | `transactions` | 통합 거래내역 (CSV 열 + `batch`, `visible_on`) |
+| `demo` | `records` | 유저 기록 |
+| `demo_eval` | `truth` | `truth.json` 전체 (jsonb) |
+| `demo_eval` | `cases` | 평가 케이스 |
+| `demo_eval` | `tx_truth`, 뷰 `tx_compare` | 거래별 실제 용도 (앱 분류와 나란히 보기) |
+
+- 정답은 `demo_eval`에만 둔다. `demo`에는 실제 용도·숨은 사실 같은 정답 열이 없다 (테스트로 확인)
+- 두 스키마 모두 공개 키(`anon`·`authenticated`)로는 열지 않는다. 대시보드와 DB 연결 문자열(`.env`의 `SUPABASE_DB_URL`)로만 본다
+- `--reset`은 두 스키마를 통째로 지운다. 테이블 구조를 바꿨을 때 전체를 다시 올리는 용도다
+
 ## 미정
 - 에이전트 그래프 노드 목록 (A)
 - 사용자 데이터 저장 형식 (B) — 통합 거래내역을 적재하는 표 포함
