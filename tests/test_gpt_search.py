@@ -225,3 +225,20 @@ def test_long_titles_are_shortened():
                            "title": "알뜰폰 통신사 - KB국민은행 KB Liiv M(리브모바일) 요금제 안내 페이지입니다 정말 긴 제목"}],
                          ["liivm.com"])
     assert len(out[0]["title"]) <= 40 and out[0]["title"].endswith("…")
+
+
+def test_query_guard_catches_more_pii_and_money():
+    assert "01012345678" not in safe_query("알뜰폰 요금제 01012345678 월 10GB")
+    assert "1234567812345678" not in safe_query("요금제 1234567812345678 월 10GB")
+    assert safe_query("알뜰폰 요금제 월 10GB 소진 후 3Mbps") == "알뜰폰 요금제 월 10GB 소진 후 3Mbps"   # 스펙 숫자는 그대로
+    for bad in ["월 ₩65780 이하", "월 6만 5천 이하", "요금제 30000 KRW", "월 5만 이하"]:
+        with pytest.raises(ValueError):
+            safe_query(bad)
+
+
+def test_overflow_links_are_kept_for_more_view():
+    raw = [NS(url=f"https://www.sk7mobile.com/prod/data/callingPlanView.do?prodCd=PD{i}", title=f"SK7 {i}") for i in range(4)]
+    g = GPTSearch(model="m", client=FakeClient(NS(output=[NS(type="web_search_call", action=NS(sources=raw))])))
+    ev = g.panel("q", ["sk7mobile.com"])
+    assert [x["title"] for x in ev["sources"]] == ["SK7 0", "SK7 1"]
+    assert [x["title"] for x in g.last_more] == ["SK7 2", "SK7 3"]          # 지우지 않고 '더 보기'로

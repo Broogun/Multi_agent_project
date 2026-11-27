@@ -20,7 +20,9 @@ from ..agent.tools import PII
 from ..contracts import SEARCH_NOTICE, SearchPanelEvent, SearchSource
 
 # 검색어에 금액(지금 통신비 등 재무 정보)이 있으면 보내지 않는다 (docs/06)
-MONEY = re.compile(r"\d[\d,]*\s*(원|만\s*원|천\s*원)|\d+\s*만원")
+MONEY = re.compile(r"[₩￦]\s*\d|\d[\d,.]*\s*(원|만|천|krw)|\bkrw\b", re.IGNORECASE)
+# 구분자 없는 전화번호(01012345678)·카드·계좌번호처럼 긴 숫자열
+LONG_DIGITS = re.compile(r"(?<!\d)(?:0\d{8,10}|\d{9,})(?!\d)")
 MAX_QUERY_LEN = 100
 PAGE_ACTIONS = ("open_page", "find_in_page")     # 결과 페이지를 열어 읽는 동작
 TRACKING_PREFIXES = ("utm_", "gad_")
@@ -148,9 +150,9 @@ def in_allowed(url: str, allowed: list[str]) -> bool:
     return any(h == d or h.endswith("." + d) for d in allowed)
 
 
-def filter_sources(raw: list[dict], allowed: list[str], official: set[str] | None = None,
-                   path_rules: dict[str, tuple[str, ...]] | None = None) -> list[SearchSource]:
-    """표시 전 필터. raw: [{"url", "title"}]. 순서는 공식 먼저, 그다음 원래 순서."""
+def rank_sources(raw: list[dict], allowed: list[str], official: set[str] | None = None,
+                 path_rules: dict[str, tuple[str, ...]] | None = None) -> list[SearchSource]:
+    """표시 전 필터 (상한 전). raw: [{"url", "title"}]. 순서는 공식 먼저, 그다음 원래 순서."""
     official = official or set()
     titles: dict[str, str] = {}               # 같은 페이지에 제목이 있는 출처가 있으면 그 제목을 쓴다
     for r in raw:
@@ -176,15 +178,34 @@ def filter_sources(raw: list[dict], allowed: list[str], official: set[str] | Non
         rank = 0 if any(_host(u) == d or _host(u).endswith("." + d) for d in official) else 1
         out.append((rank, i, {"title": title, "uri": u}))
     out.sort(key=lambda t: (t[0], t[1]))
+    return [src for _, _, src in out]
+
+
+def apply_caps(pinned: list[SearchSource], ranked: list[SearchSource], allowed: list[str]
+               ) -> tuple[list[SearchSource], list[SearchSource]]:
+    """처음에 보일 링크와 '더 보기'로 접을 링크로 나눈다 (지우지 않는다, docs/06 숨김 표시).
+    고정 링크를 앞에 두고, 같은 페이지는 빼고, 사이트별 MAX_PER_SITE · 전체 MAX_LINKS 를 넘으면 접는다."""
+    keys = {page_key(x["uri"]) for x in pinned}
     per_site: dict[str, int] = {}
-    kept: list[SearchSource] = []
-    for _, _, src in out:
-        site = _site(src["uri"], allowed)
-        if per_site.get(site, 0) >= MAX_PER_SITE:
+    for x in pinned:
+        per_site[_site(x["uri"], allowed)] = per_site.get(_site(x["uri"], allowed), 0) + 1
+    shown, more = list(pinned), []
+    for x in ranked:
+        if page_key(x["uri"]) in keys:
+            continue
+        site = _site(x["uri"], allowed)
+        if per_site.get(site, 0) >= MAX_PER_SITE or len(shown) - len(pinned) >= MAX_LINKS:
+            more.append(x)
             continue
         per_site[site] = per_site.get(site, 0) + 1
-        kept.append(src)
-    return kept[:MAX_LINKS]
+        shown.append(x)
+    return shown, more
+
+
+def filter_sources(raw: list[dict], allowed: list[str], official: set[str] | None = None,
+                   path_rules: dict[str, tuple[str, ...]] | None = None) -> list[SearchSource]:
+    """표시 전 필터 + 상한. 처음에 보일 링크만 돌려준다 (접힌 링크는 apply_caps 의 두 번째 값)."""
+    return apply_caps([], rank_sources(raw, allowed, official, path_rules), allowed)[0]
 
 
 def _get(o: Any, k: str, default=None):
@@ -207,22 +228,6 @@ def extract_sources(response: Any) -> list[dict]:
     return raw
 
 
-def merge_pinned(pinned: list[SearchSource], found: list[SearchSource], allowed: list[str]) -> list[SearchSource]:
-    """고정 링크를 앞에 두고, 검색 결과에서 같은 페이지는 뺀다. 사이트별 상한에는 고정 링크도 센다."""
-    keys = {page_key(x["uri"]) for x in pinned}
-    per_site: dict[str, int] = {}
-    for x in pinned:
-        per_site[_site(x["uri"], allowed)] = per_site.get(_site(x["uri"], allowed), 0) + 1
-    out = list(pinned)
-    for x in found:
-        site = _site(x["uri"], allowed)
-        if page_key(x["uri"]) in keys or per_site.get(site, 0) >= MAX_PER_SITE:
-            continue
-        per_site[site] = per_site.get(site, 0) + 1
-        out.append(x)
-    return out[:len(pinned) + MAX_LINKS]
-
-
 def pinned_panel(topic: str) -> SearchPanelEvent:
     """검색 없이 고정 링크만 띄운다 (API 호출 없음)."""
     links = list(PINNED.get(topic, []))
@@ -233,7 +238,7 @@ def pinned_panel(topic: str) -> SearchPanelEvent:
 
 def safe_query(query: str) -> str:
     """외부로 보내기 전 마지막 검사. 개인정보는 지우고, 금액이 있으면 거부한다."""
-    q = " ".join(PII.sub("", query or "").split())
+    q = " ".join(LONG_DIGITS.sub("", PII.sub("", query or "")).split())
     if not q:
         raise ValueError("검색어가 비었다")
     if MONEY.search(q):
@@ -256,6 +261,7 @@ class GPTSearch:
             client = OpenAI()
         self.model, self.client, self.official = model, client, official or set()
         self.last_actions: list = []
+        self.last_more: list[SearchSource] = []     # 상한으로 접힌 링크 ("N건 더 보기"). 저장하지 않는다
 
     def panel(self, query: str, allowed_domains: list[str], topic: str | None = None) -> SearchPanelEvent:
         """topic 이 있으면 그 고정 링크를 먼저 두고 검색 결과를 뒤에 붙인다 ("더 찾아보기")."""
@@ -278,10 +284,10 @@ class GPTSearch:
                              if _get(i, "type") == "web_search_call"]
         if any(a in PAGE_ACTIONS for a in self.last_actions):
             raise RuntimeError(f"검색 중 페이지를 열었다 ({self.last_actions}). 결과를 쓰지 않는다 (docs/06)")
-        sources = filter_sources(extract_sources(resp), allowed_domains, self.official)
+        ranked = rank_sources(extract_sources(resp), allowed_domains, self.official)
         pinned = [x for x in PINNED.get(topic or "", []) if in_allowed(x["uri"], allowed_domains)]   # 고정 링크도 허용 도메인 안에서만
-        if pinned:
-            sources = merge_pinned(pinned, sources, allowed_domains)
+        sources, self.last_more = apply_caps(pinned, ranked, allowed_domains)
+        # ⚠️ SearchPanelEvent 계약에는 '더 보기' 칸이 없다. 계약 변경(팀 합의) 전까지는 last_more 로만 넘긴다.
         return {"type": "search_panel", "panel_id": panel_id(query, sources), "query": query,
                 "text": PANEL_TEXT if sources else EMPTY_TEXT, "suggestions_html": None,
                 "sources": sources, "notice": SEARCH_NOTICE}
