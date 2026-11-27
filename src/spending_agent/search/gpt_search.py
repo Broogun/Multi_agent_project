@@ -28,7 +28,6 @@ TRACKING_KEYS = {"gclid", "gbraid", "wbraid", "fbclid", "ref", "ref_src", "sourc
 MAX_LINKS = 8
 MAX_PER_SITE = 2      # 한 사이트가 결과를 채우지 않게 (여러 사업자를 고르게)
 # 같은 페이지의 모바일·API 주소는 하나로 본다
-HOST_ALIASES = ("www.", "m.", "mobile.", "api.")
 VIEW_PARAMS = {"type"}            # 화면 전환용 파라미터 (같은 페이지)
 # 파일·첨부는 요금제 안내가 아니라 뺀다
 FILE_HINTS = ("download", "/attach/", "/upload/")
@@ -53,7 +52,8 @@ SITE_NAMES = {"smartchoice.or.kr": "스마트초이스", "mvnohub.kr": "알뜰�
               "uplusumobile.com": "U+유모바일", "sk7mobile.com": "SK7모바일", "liivm.com": "KB리브모바일",
               "direct.lghellovision.net": "LG헬로모바일",
               "kt.com": "KT", "sktelecom.com": "SKT", "lguplus.com": "LG U+"}
-PATH_LABELS = (("plancompare", "요금제 비교"), ("catalog", "요금제 목록"), ("recomend_search", "맞춤 요금제 찾기"),
+MAX_TITLE = 40
+PATH_LABELS = (("/products/", "요금제 상세"), ("plancompare", "요금제 비교"), ("catalog", "요금제 목록"), ("recomend_search", "맞춤 요금제 찾기"),
                ("prepay", "선불 요금제"), ("productdetail", "상품 상세"), ("feeplandetail", "요금제 상세"),
                ("callingplanview", "요금제 상세"), ("pricdetail", "요금제 상세"), ("callingplanlist", "요금제 목록"),
                ("priclist", "요금제 목록"), ("products", "요금제 목록"), ("/rateplan/plans", "요금제"),
@@ -87,16 +87,16 @@ def _host(url: str) -> str:
     return h.lower().removeprefix("www.")
 
 
+KR_SECOND = ("or.kr", "co.kr", "go.kr", "ne.kr", "re.kr", "ac.kr")
+
+
 def _base_host(url: str) -> str:
-    """m. · www. · api. 를 뗀 호스트 (같은 페이지 판단용)."""
+    """하위 도메인(m. · www. · www2. · family. 등)을 뗀 사이트 도메인 (같은 페이지 판단용).
+    경로·파라미터까지 같아야 같은 페이지로 보므로, 서로 다른 하위 사이트의 다른 페이지는 섞이지 않는다."""
     h = (urlsplit(url).hostname or "").lower()
-    changed = True
-    while changed:
-        changed = False
-        for a in HOST_ALIASES:
-            if h.startswith(a) and h.count(".") > 1:
-                h, changed = h[len(a):], True
-    return h
+    parts = h.split(".")
+    keep = 3 if ".".join(parts[-2:]) in KR_SECOND else 2
+    return ".".join(parts[-keep:])
 
 
 def page_key(url: str) -> str:
@@ -171,6 +171,8 @@ def filter_sources(raw: list[dict], allowed: list[str], official: set[str] | Non
             continue
         seen.add(key)
         title = titles.get(key) or label_for(u, allowed)
+        if len(title) > MAX_TITLE:
+            title = title[:MAX_TITLE - 1].rstrip() + "…"
         rank = 0 if any(_host(u) == d or _host(u).endswith("." + d) for d in official) else 1
         out.append((rank, i, {"title": title, "uri": u}))
     out.sort(key=lambda t: (t[0], t[1]))
@@ -205,10 +207,20 @@ def extract_sources(response: Any) -> list[dict]:
     return raw
 
 
-def merge_pinned(pinned: list[SearchSource], found: list[SearchSource]) -> list[SearchSource]:
-    """고정 링크를 앞에 두고, 검색 결과에서 같은 페이지는 뺀다."""
+def merge_pinned(pinned: list[SearchSource], found: list[SearchSource], allowed: list[str]) -> list[SearchSource]:
+    """고정 링크를 앞에 두고, 검색 결과에서 같은 페이지는 뺀다. 사이트별 상한에는 고정 링크도 센다."""
     keys = {page_key(x["uri"]) for x in pinned}
-    return list(pinned) + [x for x in found if page_key(x["uri"]) not in keys][:MAX_LINKS]    # 상한은 found 에 이미 적용
+    per_site: dict[str, int] = {}
+    for x in pinned:
+        per_site[_site(x["uri"], allowed)] = per_site.get(_site(x["uri"], allowed), 0) + 1
+    out = list(pinned)
+    for x in found:
+        site = _site(x["uri"], allowed)
+        if page_key(x["uri"]) in keys or per_site.get(site, 0) >= MAX_PER_SITE:
+            continue
+        per_site[site] = per_site.get(site, 0) + 1
+        out.append(x)
+    return out[:len(pinned) + MAX_LINKS]
 
 
 def pinned_panel(topic: str) -> SearchPanelEvent:
@@ -269,7 +281,7 @@ class GPTSearch:
         sources = filter_sources(extract_sources(resp), allowed_domains, self.official)
         pinned = [x for x in PINNED.get(topic or "", []) if in_allowed(x["uri"], allowed_domains)]   # 고정 링크도 허용 도메인 안에서만
         if pinned:
-            sources = merge_pinned(pinned, sources)
+            sources = merge_pinned(pinned, sources, allowed_domains)
         return {"type": "search_panel", "panel_id": panel_id(query, sources), "query": query,
                 "text": PANEL_TEXT if sources else EMPTY_TEXT, "suggestions_html": None,
                 "sources": sources, "notice": SEARCH_NOTICE}

@@ -204,3 +204,24 @@ def test_at_most_two_links_per_site():
             {"url": "https://www.uplusumobile.com/product/pric/pricDetail?seq=2", "title": "U+ 3"}]
     out = filter_sources(raw, ["sk7mobile.com", "uplusumobile.com"])
     assert [s["title"] for s in out] == ["SK7 0", "SK7 1", "U+ 1", "U+ 2"]
+
+
+def test_pinned_counts_toward_site_cap_and_subdomain_pages_merge():
+    resp = NS(output=[NS(type="web_search_call", action=NS(sources=[
+        NS(url="https://www.mvnohub.kr/product/products/8705.do", title=""),
+        NS(url="https://www.mvnohub.kr/product/products/7787.do", title=""),
+        NS(url="https://www.uplusumobile.com/product/pric/usim/pricList", title="U+ 목록"),
+        NS(url="https://family.uplusumobile.com/product/pric/usim/pricList", title=""),
+        NS(url="https://www2.uplusumobile.com/product/pric/usim/pricList", title=""),
+    ]))])
+    allowed = ["smartchoice.or.kr", "mvnohub.kr", "uplusumobile.com"]
+    ev = GPTSearch(model="m", client=FakeClient(resp)).panel("q", allowed, topic="mobile_plan")
+    titles = [x["title"] for x in ev["sources"]]
+    assert titles == ["스마트초이스 요금제 비교", "알뜰폰허브 요금제 목록", "알뜰폰허브 요금제 상세", "U+ 목록"]
+
+
+def test_long_titles_are_shortened():
+    out = filter_sources([{"url": "https://m.liivm.com/rateplan/plans/product-detailed",
+                           "title": "알뜰폰 통신사 - KB국민은행 KB Liiv M(리브모바일) 요금제 안내 페이지입니다 정말 긴 제목"}],
+                         ["liivm.com"])
+    assert len(out[0]["title"]) <= 40 and out[0]["title"].endswith("…")
