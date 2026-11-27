@@ -36,12 +36,18 @@ FEEDBACK = """지금은 {kind} 시간이다. 도구로 내역을 확인하고, �
 질문은 ask_user 로 하고, 이번 피드백에서 최대 {max_q}개다. 제안은 최대 3개, 크기 순서로 낸다.
 쟁점 유형: {issue_types}
 쟁점 상태: {statuses}
-제안 행동: {actions}. 줄이기는 per_week(주 몇 회 줄일지), 저축 늘리기는 amount(월 몇 원 더 넣을지)를 적는다.
+제안 행동: {actions}.
+제안 강도는 행동에 맞는 칸만 적고 나머지 칸은 뺀다:
+- 줄이기: per_week (주 몇 회 줄일지)
+- 저축 늘리기: amount (월 몇 원 더 넣을지) / 상한 정하기: amount (월 상한 금액)
+- 바꾸기: to (무엇으로 바꿀지, 짧은 말)
+- 목표 조정: deadline (새 마감일 YYYY-MM-DD), 금액도 바꾸면 amount (새 목표 금액)
 JSON:
 {{"issues": [{{"type": "쟁점 유형", "target": "대상 (가맹점·항목)", "status": "쟁점 상태",
               "evidence": ["근거 거래ID (도구 결과의 거래ID·tx)"], "summary": "한 줄"}}],
  "goal": {{"on_track": true | false | null, "summary": "한 줄"}},
- "suggestions": [{{"target": "대상", "action": "제안 행동", "per_week": 1, "amount": 30000, "text": "유저에게 보일 문장"}}],
+ "suggestions": [{{"target": "대상", "action": "제안 행동", "per_week": 1, "amount": 30000, "to": "바꿀 것",
+                  "deadline": "YYYY-MM-DD", "text": "유저에게 보일 문장"}}],
  "message": "유저에게 보낼 메시지 (숫자는 도구 결과에서만)"}}"""
 
 UNDERSTAND = """지금은 유저 이해 시간이다. 유저가 방금 한 일(기록, 질문 답, 제안 반응)을 보고 유저 정보를 갱신한다.

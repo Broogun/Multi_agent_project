@@ -1,13 +1,16 @@
 """채점 (docs/10 §7, 초안). 정답(truth.json)은 여기서만 쓴다. 에이전트 구조와 상관없이 같은 기준이다.
 
 규칙 채점 (LLM 없음, CI 에서 돈다)
-- 쟁점: 피드백 시점마다 기준 세계에서 '필수'인 쟁점을 몇 개 짚었나. 에이전트 쟁점과 정답 쟁점은
+- 정답은 에이전트가 실제로 본 세계(harness.served_world: 수락한 제안이 반영된 ③, 없으면 ②)로 만든다.
+- 쟁점: 피드백 시점마다 '필수'인 쟁점을 몇 개 짚었나. 제안으로 근거 거래가 하나라도 안 생긴 쟁점(막은 쟁점,
+  generator 의 prevented)은 필수에서 빼고 선택으로 본다. 에이전트 쟁점과 정답 쟁점은
   ① 근거 거래ID 가 겹치거나 ② 유형이 같고 대상 낱말이 맞거나 ③ 대상 낱말(절약 후보 분류·제목 낱말)이 맞으면 같은 것으로 본다.
   어느 방법으로 맞췄는지 남기므로 사람이 확인할 수 있다. '종료'된 쟁점을 앞서 짚었다면 '해결'로 갱신했는지도 본다.
 - 숫자: 메시지·제안 문장의 숫자가 도구 결과에 있는지 (첫 답, 최종 답)
 - 질문: 질문 수, 숨은 사실을 맞힌 질문 수 (시뮬레이터가 답을 정했는가)
 - 제안: 수락·거절·보류 수, 보호 지출을 건드린 제안 수 (절약액이 커도 실패로 따로 센다)
-- 절약: 세 세계의 끝난 달 (수입 − 지출) 차이 (responses.compare). LLM 점수는 피드백 효과(③ 앱+피드백 − ② 앱만)
+- 절약: 세 세계의 끝난 달 (수입 − 지출) 차이 (responses.compare). LLM 점수는 피드백 효과(③ 앱+피드백 − ② 앱만)의
+  기댓값(expected_feedback_effect: 습관 지출을 확률 × 평균 금액으로 바꾼 값). 실제 거래 값은 참고로 같이 남긴다
 - 비용: LLM 호출 수, 토큰, 시간
 
 LLM 심판 (선택): 케이스마다 check_at 피드백의 출력·질문·도구 결과를 보고 expect / must_not 를 판정한다.
@@ -20,7 +23,8 @@ import json
 import re
 
 from ..demo import responses
-from ..demo.generator import build_world, load_persona
+from ..demo.generator import load_persona
+from .harness import served_world
 from .llm import LLM
 from .single import parse_json
 
@@ -83,14 +87,15 @@ def _sum(calls, key):
 
 def score(run: dict, judge: LLM | None = None) -> dict:
     p = load_persona(run["persona"])
-    truth = build_world(p).truth
+    truth = served_world(p, run["self_scale"], run["accepted"]).truth
     items = _truth_items(truth)
     timeline = {t["date"]: t for t in truth["facts"]["timeline"]}
+    prevented = sorted(i["id"] for i in truth["rubric"]["issues"] if i.get("prevented"))
 
     points, flagged, resolved = [], set(), {}
     req_total = req_hit = unmatched = 0
     for fb in run["feedbacks"]:
-        st = timeline[fb["date"]]["issues"]
+        st = {i: "선택" if s == "필수" and i in prevented else s for i, s in timeline[fb["date"]]["issues"].items()}
         m = match_issues(fb["output"].get("issues", []), items)
         required = [i for i, s in st.items() if s == "필수"]
         hit = [i for i in required if i in m]
@@ -102,6 +107,7 @@ def score(run: dict, judge: LLM | None = None) -> dict:
         req_total, req_hit = req_total + len(required), req_hit + len(hit)
         points.append({"date": fb["date"], "kind": fb["kind"], "required": required, "hit": hit,
                        "missed": [i for i in required if i not in m], "optional_hit": [i for i in m if st.get(i) == "선택"],
+                       "prevented": [i for i in prevented if timeline[fb["date"]]["issues"].get(i) == "필수"],
                        "closed_not_updated": [i for i, ok in resolved.items() if not ok],
                        "how": {i: x["how"] for i, x in m.items()}})
     closed_total, closed_ok = len(resolved), sum(resolved.values())
@@ -116,7 +122,7 @@ def score(run: dict, judge: LLM | None = None) -> dict:
     out = {
         "issues": {"required": req_total, "hit": req_hit, "recall": round(req_hit / req_total, 3) if req_total else None,
                    "closed_to_update": closed_total, "closed_updated": closed_ok, "unmatched_agent_issues": unmatched,
-                   "by_point": points},
+                   "prevented": prevented, "by_point": points},
         "numbers": {"feedbacks": len(fbs), "first_ok": sum(fb["validation_first"].get("ok", False) for fb in fbs),
                     "final_ok": sum(fb["validation_final"].get("ok", False) for fb in fbs),
                     "bad": {fb["date"]: fb["validation_final"].get("bad") for fb in fbs
@@ -128,7 +134,8 @@ def score(run: dict, judge: LLM | None = None) -> dict:
                         "protected_violations": sum(r["decision"] == "거절" and r.get("protected", False) for r in reacts),
                         "rejected_ratio": round(decisions["거절"] / len(reacts), 3) if reacts else None},
         "saving": saving if saving is None else {k: saving[k] for k in (
-            "through", "scale", "feedback_effect", "self_effect", "total", "required_by_now", "calc")},
+            "through", "scale", "expected_feedback_effect", "expected_self_effect", "feedback_effect", "self_effect",
+            "total", "required_by_now", "served_required_by_now", "calc")},
         "cost": {"llm_calls": _sum(run["calls"], "llm_calls"), "tool_calls": _sum(run["calls"], "tool_calls"),
                  "input_tokens": _sum(run["calls"], "input_tokens"), "output_tokens": _sum(run["calls"], "output_tokens"),
                  "seconds": round(sum(c.get("seconds", 0) for c in run["calls"]), 1),
