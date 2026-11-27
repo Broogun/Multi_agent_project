@@ -21,14 +21,17 @@ def _ids(cases):
     return [c["id"] for c in cases]
 
 
+BASELINE_P1 = [f"P1-C{i:02d}" for i in range(1, 10)] + ["P1-C15"]   # C15: 온보딩 보고서·목표 생성 (261127 추가)
+
+
 def test_p1_two_weeks_matches_baseline(truths):
-    """12/14까지면 기준선 리포트(261126-2030)에서 채점한 P1 케이스 9개와 같다."""
-    assert _ids(reply_cases(truths["P1"], "2026-12-14")) == [f"P1-C{i:02d}" for i in range(1, 10)]
+    """12/14까지면 기준선 리포트(261126-2030)에서 채점한 P1 케이스 9개 + 온보딩 목표 케이스."""
+    assert _ids(reply_cases(truths["P1"], "2026-12-14")) == BASELINE_P1
 
 
 def test_p1_full_period_still_excludes_feedback_cases(truths):
     """1/31까지 만들어도 쟁점·월간 피드백 케이스(C10~C14)는 이 구조로 채점하지 않는다."""
-    assert _ids(reply_cases(truths["P1"], "2027-01-31")) == [f"P1-C{i:02d}" for i in range(1, 10)]
+    assert _ids(reply_cases(truths["P1"], "2027-01-31")) == BASELINE_P1
 
 
 def test_cases_after_data_end_are_dropped(truths):

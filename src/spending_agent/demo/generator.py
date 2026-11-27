@@ -634,24 +634,43 @@ def _cases(p, record_meta, issues, points, d0) -> list[dict]:
     return out
 
 
-def goal_progress(p: dict, events: list[Event], d0: dt.date, upto: dt.date) -> dict | None:
-    """목표 달성도 (가정, docs/10 §3). upto 까지 들어온 D0 이후 내역 기준 (내역에 찍힌 달로 나눈다).
-    - 진척 = 현재 저축액 + 끝난 달들의 (수입 − 지출). 필요 = 필요 월 저축액 × 끝난 달 수.
-      이번 달은 월급 전후로 크게 흔들리므로 진척에 넣지 않고 지금까지의 수입·지출만 따로 보여준다.
+def active_goal(p: dict) -> dict | None:
+    """지금 쓰는 목표 {name, amount, deadline(date), current_saved}.
+    목표는 고정 질의로 받지 않고 온보딩 대화에서 유저가 만든다. 하네스가 만든 목표를 p["goal"] 에 넣는다 (None = 아직 없음).
+    키가 없으면(원본 페르소나) 유저가 원하는 목표(onboarding.goal_intent)로 본다: 데이터 설계 검사와 공유 정답용이다."""
+    if "goal" in p:
+        g = p["goal"]
+    else:
+        ob = p.get("onboarding", {})
+        i = ob.get("goal_intent")
+        g = i and {"name": i["name"], "amount": i["amount"], "deadline": i["deadline"],
+                   "current_saved": ob.get("fixed_answers", {}).get("saved", 0)}
+    if not g:
+        return None
+    d = g["deadline"]
+    return {**g, "deadline": d if isinstance(d, dt.date) else dt.date.fromisoformat(str(d)[:10])}
+
+
+def month_flows(p: dict, events: list[Event], start: dt.date, upto: dt.date, spread: bool = False) -> list[dict]:
+    """start 가 속한 달부터 upto 가 속한 달까지 달마다 수입·지출·남는 돈(net = 수입 − 지출). upto 까지 들어온 것만.
     - 저축 이체는 내 돈의 이동이라 지출이 아니다. 카드대금·머니 충전도 이미 센 돈이라 빼지 않는다.
     - 현금 인출은 쓴 돈으로 본다. 정산 입금과 환불은 지출에서 뺀다.
-    - 목표를 위해 쓴 돈(goal_tracking.goal_categories, 예: 여행 예약)은 지출이 아니라 목표에 쓴 돈으로 진척에 넣는다."""
-    goal = _goal(p.get("onboarding", {}).get("fixed_answers", {}).get("goal"), d0)
-    if not goal:
-        return None
+    - 목표를 위해 쓴 돈(goal_tracking.goal_categories, 예: 여행 예약)은 지출이 아니라 goal_spend 로 따로 둔다.
+    - 할부는 결제한 달에 전액이다. spread=True 면 할부 결제를 회차(전액 ÷ 개월)로 나눠 그 달부터 센다 (현금흐름 기준)."""
     cats = set(p.get("goal_tracking", {}).get("goal_categories", []))
     months = {f"{y}-{m:02d}": {"month": f"{y}-{m:02d}", "income": 0, "spend": 0, "goal_spend": 0,
-                               "done": dt.date(y, m, _last_day(y, m)) <= upto} for y, m in _months(d0, upto + DAY)}
+                               "done": dt.date(y, m, _last_day(y, m)) <= upto} for y, m in _months(start, upto + DAY)}
     for e in events:
-        if e.at.date() < d0 or e.visible_on > upto:
+        if e.at.date() < start or e.visible_on > upto:
             continue
         b, sign = months[f"{e.at:%Y-%m}"], -1 if e.kind == "cancel" else 1
-        if e.kind in ("purchase", "cancel"):
+        if e.kind == "purchase" and spread and e.installment > 1 and e.category not in cats:
+            per = e.amount // e.installment
+            for k in range(e.installment):
+                ym = _add_months(e.at.year, e.at.month, k)
+                if ym in months:
+                    months[ym]["spend"] += per if k else e.amount - per * (e.installment - 1)
+        elif e.kind in ("purchase", "cancel"):
             b["goal_spend" if e.category in cats else "spend"] += sign * e.amount
         elif e.kind == "transfer_in" and e.group:
             b["spend"] -= e.amount
@@ -661,8 +680,21 @@ def goal_progress(p: dict, events: list[Event], d0: dt.date, upto: dt.date) -> d
             b["spend"] += e.amount
     for b in months.values():
         b["net"] = b["income"] - b["spend"]
-    done = [b for b in months.values() if b.pop("done")]
-    current = next((b for b in months.values() if b not in done), None)
+    return list(months.values())
+
+
+def goal_progress(p: dict, events: list[Event], d0: dt.date, upto: dt.date) -> dict | None:
+    """목표 달성도 (가정, docs/10 §3). upto 까지 들어온 D0 이후 내역 기준 (내역에 찍힌 달로 나눈다).
+    - 진척 = 현재 저축액 + 끝난 달들의 (수입 − 지출). 필요 = 필요 월 저축액 × 끝난 달 수.
+      이번 달은 월급 전후로 크게 흔들리므로 진척에 넣지 않고 지금까지의 수입·지출만 따로 보여준다.
+    - 수입·지출 기준은 month_flows 와 같다. 목표를 위해 쓴 돈은 지출이 아니라 목표에 쓴 돈으로 진척에 넣는다.
+    - 목표는 active_goal (유저가 만든 목표). 아직 없으면 None."""
+    goal = _goal(active_goal(p), d0)
+    if not goal:
+        return None
+    months = month_flows(p, events, d0, upto)
+    done = [b for b in months if b.pop("done")]
+    current = next((b for b in months if b not in done), None)
     gained = sum(b["net"] for b in done)
     required = goal["monthly_required"] * len(done)
     return {"through": upto.isoformat(), "goal_amount": goal["amount"], "current_saved": goal["current_saved"],
@@ -671,6 +703,20 @@ def goal_progress(p: dict, events: list[Event], d0: dt.date, upto: dt.date) -> d
             "calc": (f"현재 저축 {goal['current_saved']:,} + 끝난 달 (수입 − 지출) {gained:,} = "
                      f"{goal['current_saved'] + gained:,} / 필요 {goal['monthly_required']:,} × {len(done)}개월 = "
                      f"{required:,} (목표용 지출은 지출에서 빼고 목표에 쓴 돈으로 본다)")}
+
+
+def cashflow(p: dict, events: list[Event], start: dt.date, d0: dt.date) -> dict:
+    """온보딩 보고서 정답: 온보딩 때 보이는 기간(start ~ D0 전날)의 달마다 수입·지출·남는 돈과 평균 (원 단위 반올림).
+    spread 는 할부를 회차로 나눠 본 값이다. 보고서 채점은 둘 중 가까운 쪽과 비교한다 (어느 쪽도 맞는 계산이라서)."""
+    def summary(rows):
+        rows = [{k: b[k] for k in ("month", "income", "spend", "goal_spend", "net")} for b in rows if b["done"]]
+        n = len(rows) or 1
+        return {"months": rows, "avg_income": round(sum(b["income"] for b in rows) / n),
+                "avg_spend": round(sum(b["spend"] for b in rows) / n), "avg_net": round(sum(b["net"] for b in rows) / n)}
+    base, spread = summary(month_flows(p, events, start, d0 - DAY)), summary(month_flows(p, events, start, d0 - DAY, True))
+    return {**base, "spread": spread,
+            "calc": f"끝난 달 {len(base['months'])}개의 (수입 − 지출) 평균 = {base['avg_net']:,} "
+                    f"(할부를 회차로 나누면 {spread['avg_net']:,})"}
 
 
 def _timeline(p, events, points, issues, cases, d0) -> list[dict]:
@@ -734,7 +780,8 @@ def _truth(p, events, by_id, rows, groups, record_meta, balance, bills, start, d
         "period": {"history": [start.isoformat(), (d0 - DAY).isoformat()],
                    "live": [d0.isoformat(), (end - DAY).isoformat()], "feedback": points},
         "facts": {
-            "goal": _goal(fixed.get("goal"), d0),
+            "goal": _goal(active_goal(p), d0),
+            "cashflow": cashflow(p, events, start, d0),
             "levers": _levers(p, monthly, groups, by_id, history),
             "monthly": monthly,
             "balance": balance,
@@ -751,14 +798,15 @@ def _truth(p, events, by_id, rows, groups, record_meta, balance, bills, start, d
                         "true_category": e.category, "amount": e.amount, "group": e.group, "ref": e.ref,
                         "installment": e.installment} for e in events],
         },
-        "user_sim": {"fixed_answers": fixed, "hidden_facts": p.get("hidden_facts", []),
+        "user_sim": {"fixed_answers": fixed, "goal_intent": p.get("onboarding", {}).get("goal_intent"),
+                     "hidden_facts": p.get("hidden_facts", []),
                      "responses": p.get("responses", [])},          # 반응 규칙 (서비스 있음 세계, docs/10 §4)
         "rubric": {"problems": p.get("problems", []), "issues": issues, "cases": cases},
     }
 
 
 def _goal(goal: dict | None, d0: dt.date) -> dict | None:
-    """고정 답변의 목표로 부족액과 필요 월 저축액을 계산한다 (D0가 속한 달부터 마감 달까지)."""
+    """목표(active_goal)로 부족액과 필요 월 저축액을 계산한다 (D0가 속한 달부터 마감 달까지)."""
     if not goal:
         return None
     deadline = goal["deadline"]
