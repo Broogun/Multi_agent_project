@@ -156,6 +156,39 @@ def test_truth_is_split_into_facts_user_sim_rubric(world):
     assert world.truth["facts"]["goal"]["monthly_required"] > 0
 
 
+def test_goal_is_set_in_conversation_not_fixed_answers(world):
+    """목표는 고정 질의로 받지 않는다 (온보딩 대화 → 목표 생성 버튼). 원하는 목표는 시뮬레이터만 본다."""
+    p, sim = world.persona, world.truth["user_sim"]
+    assert "goal" not in sim["fixed_answers"] and sim["fixed_answers"]["saved"] > 0
+    assert sim["goal_intent"] == p["onboarding"]["goal_intent"]
+    abouts = [h.get("about") for h in sim["hidden_facts"]]
+    assert abouts.count("goal") == 1 and abouts.count("goal_flex") == 1   # 무엇·얼마·언제 / 바꿀 여지
+
+
+def test_desired_goal_needs_more_than_leftover(world):
+    """08 원칙: 원하는 목표의 필요 월 저축액 > 온보딩 3개월의 월 남는 돈(수입 − 지출). 남는 돈만으로 끝나지 않는다."""
+    f = world.truth["facts"]
+    c = f["cashflow"]
+    assert [m["month"] for m in c["months"]] == ["2026-09", "2026-10", "2026-11"]
+    assert all(m["net"] == m["income"] - m["spend"] for m in c["months"])
+    assert c["avg_net"] == round(sum(m["net"] for m in c["months"]) / 3)
+    assert f["goal"]["monthly_required"] > max(c["avg_net"], c["spread"]["avg_net"])
+
+
+def test_goal_range_reaches_a_feasible_goal():
+    """원하는 목표로는 못 닿는 P3·P4·P5는 양보 범위 안에 필요 월 저축액이 더 작은 목표가 있다. P1·P2는 못 바꾼다."""
+    import datetime as dt
+
+    from spending_agent.demo.responses import goal_range
+    fixed = {pid: goal_range(load_persona(pid)) for pid in personas()}
+    for pid in ("P1", "P2"):
+        i = load_persona(pid)["onboarding"]["goal_intent"]
+        assert fixed[pid] == {"max_deadline": i["deadline"], "min_amount": i["amount"], "max_amount": i["amount"]}
+    assert fixed["P3"]["max_deadline"] == dt.date(2028, 12, 31) and fixed["P3"]["min_amount"] == 30000000
+    assert fixed["P4"]["max_deadline"] == dt.date(2027, 3, 15) and fixed["P4"]["min_amount"] is None
+    assert fixed["P5"]["max_deadline"] == dt.date(2027, 12, 31) and fixed["P5"]["min_amount"] == 3000000
+
+
 def test_every_persona_is_tangled(world):
     """한 명에 문제 하나가 아니다: 문제 3개 이상, 방향 2개 이상, 복합 케이스 1개 이상, 기록 없는 날 케이스."""
     problems, cases = world.persona["problems"], world.persona["cases"]
@@ -184,9 +217,9 @@ def test_p1_subscriptions_and_family_phone():
     assert music_b == {"2026-10", "2026-11"}                                           # 10월부터 음악 2개
     assert any(g["payment"].startswith("phone-") for g in w.truth["facts"]["dutch_groups"])
     f = w.truth["facts"]
-    shortfall = f["goal"]["monthly_required"] - 200000                                  # 적금 20만 원
+    shortfall = f["goal"]["monthly_required"] - f["cashflow"]["avg_net"]                # 원하는 목표 − 월 남는 돈
     cancelable = 13500 + 7900 + 4900                                                    # 무비온·소리랑·웹툰패스
-    assert cancelable < shortfall < cancelable + f["levers"]["delivery"]["monthly_size"]
+    assert cancelable < shortfall < cancelable + f["levers"]["delivery"]["monthly_size"]   # 구독만으로는 모자람 (C08)
 
 
 def test_p2_cafe_trend_and_exam_spike():
@@ -199,9 +232,8 @@ def test_p2_cafe_trend_and_exam_spike():
     rest = sum(v for k, v in days.items() if k.startswith("10")) - exam
     assert nov >= 1.5 * sep                       # 시험 없이도 증가
     assert exam / 12 >= 2 * rest / 19             # 중간고사 12일이 나머지 19일보다 훨씬 잦다
-    m = _monthly("P2")
-    surplus = [sum(m[y]["income"].values()) - sum(m[y]["spend"].values()) for y in ("2026-09", "2026-10", "2026-11")]
-    assert sum(surplus) / 3 < w.truth["facts"]["goal"]["monthly_required"]   # 여유만으로는 목표에 못 미친다
+    f = w.truth["facts"]
+    assert 0 < f["cashflow"]["avg_net"] < f["goal"]["monthly_required"]   # 여유는 있지만 그것만으로는 목표에 못 미친다
 
 
 def test_p3_taxi_annual_charge_and_pt_installment():
@@ -213,8 +245,9 @@ def test_p3_taxi_annual_charge_and_pt_installment():
     nov_bill = next(b for b in w.truth["facts"]["card_bills"] if b["month"] == "2026-11")
     assert nov_bill["installments"] == 550000 - 550000 // 3 * 2                          # PT 1회차
     f = w.truth["facts"]
-    shortfall = f["goal"]["monthly_required"] - 700000
+    shortfall = f["goal"]["monthly_required"] - f["cashflow"]["avg_net"]
     assert f["levers"]["taxi"]["monthly_size"] < shortfall                                # 택시 하나로는 못 메운다
+    assert sum(v["monthly_size"] for v in f["levers"].values()) < shortfall              # 지출을 다 줄여도 원하는 시점엔 못 닿는다
     assert max(f["levers"], key=lambda k: f["levers"][k]["monthly_size"]) == "taxi"
 
 
@@ -257,6 +290,7 @@ def test_p5_payday_shopping_returns_and_zombie_subscription():
     f = w.truth["facts"]
     spend = {k: v["monthly_size"] for k, v in f["levers"].items() if v["side"] == "지출"}
     assert max(spend.values()) < f["goal"]["monthly_required"] <= sum(spend.values()) * 1.1   # 다 끊어야 겨우 닿음
+    assert abs(f["cashflow"]["spread"]["avg_net"]) < 50000         # 노트북 할부를 달마다 나눠 보면 남는 돈은 0 근처
     assert f["balance"]["bank_lowest"] < 100000                                          # 어디로 가는지 모르겠다
 
 

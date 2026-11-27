@@ -45,8 +45,18 @@ def summary(s: dict) -> str:
          f"서비스 전체 {s['saving']['total']:,}원) — {s['saving']['calc']}") if s["saving"]
         else "절약: 반응 규칙 없음 (페르소나 파일에 [[responses]] 추가 필요)",
         (f"비용: LLM {c['llm_calls']}회 · 도구 {c['tool_calls']}회 · 입력 {c['input_tokens']:,} · 출력 {c['output_tokens']:,} 토큰"
-         f" · 호출당 입력 최대 {c['max_input_per_call']:,} · {c['seconds']}초"),
+         f" · 피드백·유저 이해 1회 입력 최대 {c['max_input_per_call']:,} · {c['seconds']}초"),
     ]
+    rp, gl, ac = s.get("report"), s.get("goal"), s.get("achievement")
+    if rp:
+        lines.append(f"온보딩 보고서: 월 남는 돈 {rp.get('monthly_leftover', '없음')} (정답 {rp['truth']:,}"
+                     + (f", 오차 비율 {rp['error_ratio']} {'통과' if rp['ok'] else '벗어남'}, 기준 {rp['basis']})" if rp.get("basis") else ")"))
+    if gl:
+        lines.append(f"목표: 목표안 {'있음' if gl['proposed'] else '없음'} ({gl['source']}), 고친 칸 {gl['edited'] or '없음'}, "
+                     f"목표 질문 {gl['asked'] or '안 함'}, 필요 월 저축액 {gl['monthly_required']} (원하는 목표 {gl['desired_monthly_required']})")
+    if ac:
+        lines.append(f"목표 달성 (기댓값): 부족분 메운 비율 {ac['gap_closed_ratio']}, 궤도 ② {ac['on_track_app']} → ③ {ac['on_track_served']}"
+                     f" — {ac['calc']}")
     for case in s.get("cases", []):
         lines.append(f"  {case['id']}: {case.get('verdict')} — {case.get('reason')}")
     return "\n".join(lines)

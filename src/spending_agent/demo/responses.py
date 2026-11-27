@@ -23,7 +23,7 @@ LLM 점수는 ③ − ②(피드백 효과)로 본다. ③ − ①은 서비스 
     {cap}                 이 용도 결제를 월 상한(제안 금액) 안에서만 함
     {reimburse, after_hour, pay_day}  이 습관 결제 중 after_hour 시 이후 것을 다음 달 pay_day 에 돌려받음
     {club = "prepaid"}    회식비를 미리 걷음 (못 받는 정산이 없어짐)
-    {goal = true}         목표 금액·마감일을 제안대로 바꿈
+    {goal = true}         목표 금액·마감일을 제안대로 바꿈 (목표 조정 수락 한도 = 온보딩 목표 생성 때 유저가 고칠 수 있는 범위)
   start_days (제안 며칠 뒤부터, 기본 1), not_before (이 날 전에는 안 바뀜), hold_days (habit 효과 유지 기간,
   없으면 계속), keep_after (유지 뒤 남는 폭, 0~1, 기본 1)
 
@@ -43,10 +43,12 @@ from spending_agent.demo.generator import (
     _days,
     _last_day,
     _months,
+    active_goal,
     build_world,
     feedback_points,
     goal_progress,
     history_start,
+    month_flows,
 )
 
 # 초안: LLM에 주는 일반 목록
@@ -57,6 +59,7 @@ SELF_SCALES = {"없음": 0.0, "작게": 0.5, "중간": 1.0}   # 자기 기록 �
 EFFECT_KEYS = ("habit", "monthly", "new_monthly", "cap", "reimburse", "club", "goal")
 DAY = dt.timedelta(days=1)
 FOREVER = dt.date(2099, 12, 31)
+KEEP = object()          # 목표를 바꾸지 않고 페르소나 그대로 (원본이면 유저가 원하는 목표)
 
 
 def _effects(r: dict) -> list[dict]:
@@ -89,6 +92,17 @@ def check(p: dict) -> None:
     def fail(r, msg):
         raise ValueError(f"{p['id']} {r['id']}: {msg}")
 
+    intent = p.get("onboarding", {}).get("goal_intent")
+    if "goal" in p.get("onboarding", {}).get("fixed_answers", {}):
+        fail({"id": "fixed_answers"}, "목표는 고정 질의로 받지 않는다 (onboarding.goal_intent 에 둔다)")
+    if not intent or not all(k in intent for k in ("name", "amount", "deadline")):
+        fail({"id": "goal_intent"}, "onboarding.goal_intent 에 name, amount, deadline 이 있어야 한다")
+    abouts = [h.get("about") for h in p.get("hidden_facts", [])]
+    if bad := [a for a in abouts if a not in (None, "goal", "goal_flex")]:
+        fail({"id": "hidden_facts"}, f"about 은 goal 또는 goal_flex: {bad}")
+    if abouts.count("goal") != 1 or abouts.count("goal_flex") != 1:
+        fail({"id": "hidden_facts"}, "목표 대화 숨은 사실(about = goal, goal_flex)이 하나씩 있어야 한다")
+
     for r in p.get("responses", []):
         target = r.get("target", {})
         if not (target.get("merchants") or target.get("words")):
@@ -106,6 +120,8 @@ def check(p: dict) -> None:
                 fail(r, f"{a['action']}에는 max_amount 가 있어야 한다")
             if a["action"] == "목표 조정" and "max_deadline" not in a:
                 fail(r, "목표 조정에는 max_deadline 이 있어야 한다")
+            if a["action"] == "목표 조정" and intent and _date(a["max_deadline"]) < _date(intent["deadline"]):
+                fail(r, "목표 조정 한도(max_deadline)가 유저가 원하는 마감보다 이르다")
         for a in r.get("reject", []):
             if a["action"] != "*" and a["action"] not in ACTIONS:
                 fail(r, f"모르는 행동 {a['action']}")
@@ -298,11 +314,32 @@ def apply(p: dict, accepted: list[dict]) -> dict:
                          "pay_day": eff["pay_day"], "export": eff.get("export")})
             elif "club" in eff:
                 q["club"]["prepaid_from"] = min(q["club"].get("prepaid_from", FOREVER), start)
-            elif "goal" in eff:
-                goal = q["onboarding"]["fixed_answers"]["goal"]
-                goal["deadline"] = _date(acc["deadline"])
-                goal["amount"] = acc.get("amount", goal["amount"])
+            elif "goal" in eff:                        # 지금 쓰는 목표(유저가 만든 목표)를 바꾼다
+                goal = active_goal(q)
+                if goal:
+                    q["goal"] = {**goal, "deadline": _date(acc["deadline"]), "amount": acc.get("amount", goal["amount"])}
     return q
+
+
+# ------------------------------------------------------------------ 목표 (온보딩에서 유저가 만든다)
+def goal_range(p: dict) -> dict:
+    """목표 생성·조정에서 유저가 받아들이는 범위: 원하는 목표(goal_intent) + 목표 조정 반응 규칙의 수락 한도.
+    → {max_deadline, min_amount (None = 낮춰도 됨), max_amount}. 수락 규칙이 없으면 원하는 목표 그대로만 받는다."""
+    i = p["onboarding"]["goal_intent"]
+    out = {"max_deadline": _date(i["deadline"]), "min_amount": i["amount"], "max_amount": i["amount"]}
+    for r in p.get("responses", []):
+        if not any("goal" in e for e in _effects(r)):
+            continue
+        for a in r.get("accept", []):
+            if a["action"] == "목표 조정":
+                out["max_deadline"] = max(out["max_deadline"], _date(a["max_deadline"]))
+                out["min_amount"] = a.get("min_amount")
+    return out
+
+
+def with_goal(p: dict, goal: dict | None) -> dict:
+    """유저가 만든 목표를 넣은 페르소나 (None = 아직 목표가 없음). ②·③ 세계와 도구가 이 목표를 쓴다."""
+    return {**p, "goal": goal and {**goal, "deadline": _date(goal["deadline"])}}
 
 
 # ------------------------------------------------------------------ 자기 기록 효과
@@ -380,28 +417,34 @@ def _habit_expected(q: dict, months: set[str], upto: dt.date) -> float:
     return total
 
 
-def compare(p: dict, accepted: list[dict], scale: float = SELF_SCALES["중간"], upto: dt.date | None = None) -> dict:
-    """세 세계의 끝난 달 (수입 − 지출) 합. 기준은 generator.goal_progress 와 같다 (저축 이체는 지출이 아님).
+def compare(p: dict, accepted: list[dict], scale: float = SELF_SCALES["중간"], upto: dt.date | None = None,
+            goal=KEEP) -> dict:
+    """세 세계의 끝난 달 (수입 − 지출) 합. 기준은 generator.month_flows·goal_progress 와 같다 (저축 이체는 지출이 아님).
+    goal: 온보딩에서 유저가 만든 목표 (세 세계 모두 이 목표로 필요액을 잰다). KEEP 이면 페르소나 그대로.
     목표를 조정한 제안이 있으면 ③의 필요액은 바뀐 목표로 계산한다.
     expected_*: 습관 지출만 실제 거래 대신 기댓값으로 바꾼 값. 습관 결제 한 건이 큰 페르소나(P5 쇼핑)는 어느 결제가
     빠지느냐에 따라 실제 값이 크게 흔들리므로, LLM 끼리 비교할 때는 이 값을 본다 (나머지는 실제 값 그대로)."""
+    if goal is not KEEP:
+        p = with_goal(p, goal)
     upto = upto or p["d0"] + dt.timedelta(days=p["live_days"] - 1)
     app, app_fired = with_self(p, scale)
     served, served_fired = with_self(p, scale, accepted)
     gs, ns, es = [], [], []
     for q in (p, app, served):
         events = build_world(q).events
-        g = goal_progress(q, events, q["d0"], upto)
-        months = {m["month"] for m in g["months_done"]}
-        n = sum(m["net"] for m in g["months_done"])
-        gs.append(g)
+        done = [b for b in month_flows(q, events, q["d0"], upto) if b["done"]]
+        months = {b["month"] for b in done}
+        n = sum(b["net"] for b in done)
+        gs.append(goal_progress(q, events, q["d0"], upto))
         ns.append(n)
         es.append(round(n + _habit_spend(q, events, months, upto) - _habit_expected(q, months, upto)))
     (n1, n2, n3), (e1, e2, e3) = ns, es
+    req = [g["required_by_now"] if g else None for g in gs]
     return {"through": upto.isoformat(), "scale": scale, "without": n1, "app": n2, "served": n3,
             "feedback_effect": n3 - n2, "self_effect": n2 - n1, "total": n3 - n1,
             "expected_feedback_effect": e3 - e2, "expected_self_effect": e2 - e1,
-            "required_by_now": gs[0]["required_by_now"], "served_required_by_now": gs[2]["required_by_now"],
+            "expected_app": e2, "expected_served": e3,
+            "required_by_now": req[0], "app_required_by_now": req[1], "served_required_by_now": req[2],
             "fired": {"app": app_fired, "served": served_fired},
             "calc": (f"끝난 달 (수입 − 지출) 합: 없음 {n1:,} / 앱만 {n2:,} / 앱+피드백 {n3:,}. "
                      f"피드백 효과 {n3:,} − {n2:,} = {n3 - n2:,}, 자기 기록 효과 {n2:,} − {n1:,} = {n2 - n1:,}. "

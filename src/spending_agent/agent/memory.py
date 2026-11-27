@@ -32,6 +32,7 @@ class GapSummary(TypedDict, total=False):
 
 class UserMemory(TypedDict, total=False):
     fixed_answers: dict | None
+    goal: dict | None               # 온보딩에서 유저가 목표 생성 버튼으로 만든 목표 (고친 칸 포함)
     profile: dict                   # 확정 사실·추정 (field → {value, kind, evidence})
     patterns: list[str]
     queued_questions: list[dict]
@@ -42,7 +43,7 @@ class UserMemory(TypedDict, total=False):
 
 
 def new_memory() -> UserMemory:
-    return UserMemory(fixed_answers=None, profile={}, patterns=[], queued_questions=[], active_issues=[],
+    return UserMemory(fixed_answers=None, goal=None, profile={}, patterns=[], queued_questions=[], active_issues=[],
                       last_goal=None, recent_decisions=[], qa=[])
 
 
@@ -54,6 +55,9 @@ class Board:
     proposals: list[dict] = field(default_factory=list)
     gap: GapSummary = field(default_factory=dict)
     review: dict = field(default_factory=dict)            # {"ok": bool, "reason": str}
+    report: dict = field(default_factory=dict)            # 온보딩 보고서 (달마다 수입·지출·남는 돈, 카테고리, 패턴)
+    goal_proposal: dict = field(default_factory=dict)     # 온보딩 목표안 (필요 월 저축액은 코드가 계산)
+    goal_check: dict = field(default_factory=dict)        # 목표안 검산 (남는 돈 + 제안 절감으로 닿는가)
     trace: list[HandoffNote] = field(default_factory=list)
     forced: str | None = None                             # 가드가 강제로 마무리시킨 이유
     cache: dict[str, dict] = field(default_factory=dict)  # 이번 피드백의 조회 결과 (도구+인자 → 결과)
@@ -63,6 +67,8 @@ class Board:
         """역할마다 필요한 것만 넘긴다 (호출당 입력을 줄이려고). 전처리 전체는 analyst 만 본다."""
         base = {"쟁점": list(self.issues.values()), "제안 후보": self.proposals, "부족분 검산": self.gap,
                 "리뷰": self.review, "바통 기록": self.trace[-4:], **({"강제 마무리": self.forced} if self.forced else {})}
+        onboarding = {"보고서": self.report, "목표안": self.goal_proposal, "목표 검산": self.goal_check}
+        base |= {k: v for k, v in onboarding.items() if v}
         if role == "analyst":
             return {"규칙 전처리": self.precomputed, **base}
         if role in ("strategist", "reviewer"):

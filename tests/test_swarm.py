@@ -486,3 +486,104 @@ def test_counselor_sees_slim_memory_and_board():
     _onboarding(policy)
     assert "규칙 전처리" in prompts["analyst"] and "규칙 전처리" not in prompts["counselor"]
     assert len(prompts["counselor"]) < len(prompts["analyst"])
+
+
+# ------------------------------------------------------------------ 온보딩: 목표 대화 → 보고서 → 목표안 → 검산 (261127)
+P1_GOAL = {"name": "일본 여행 (2주)", "amount": 2100000, "deadline": "2027-04-30", "current_saved": 800000}
+
+
+def onboarding_goal_policy(seen=None):
+    """analyst 확인 질문 → counselor 목표 대화 → strategist 보고서·목표안·제안 → reviewer 목표 검산 → counselor 전달."""
+    seen = seen if seen is not None else {}
+
+    def policy(system, transcript, tools):
+        if not tools:
+            return _understand_reply()
+        role, outs, board = _role(system), tool_outputs(transcript), transcript[0]["text"]
+        if "지금은" not in board and "[온보딩]" not in system:                     # 주간: 바로 마무리
+            seen.setdefault("weekly", board)
+            return _call("respond_to_user", {"message": "확인했어요."}) if role == "counselor" \
+                else _call("handoff_to_counselor", {"reason": "주간"})
+        if role == "analyst":
+            if not outs:
+                return _call("ask_user", {"target": "무비온", "question": "무비온은 요즘도 보세요?"})
+            return _call("handoff_to_counselor", {"reason": "목표 대화 부탁"})
+        if role == "counselor" and '"목표안"' not in board:
+            if not outs:
+                return _call("ask_user", {"target": "목표", "question": "어떤 목표로 언제까지 얼마를 모으고 싶으세요?"})
+            return _call("handoff_to_strategist", {"reason": f"목표: {outs[0]['user_answer']}"})
+        if role == "counselor":
+            return _call("respond_to_user", {"message": "여행까지 매달 260,000원이 필요해요. 구독과 주말 배달을 같이 볼게요."})
+        if role == "strategist":
+            steps = [lambda: _call("calculate_many", {"expressions": ["(353500 + 145400 + 180800) // 3",
+                                                                       "13500 + 12800", "242400 / 10"]}),
+                     lambda: _call("set_report", {"monthly_leftover": outs[0]["results"][0]["result"],
+                                                  "months": [{"month": "2026-09", "leftover": 353500}],
+                                                  "patterns": ["주말 저녁 배달이 잦다"]}),
+                     lambda: _call("propose_goal", P1_GOAL),
+                     lambda: _call("propose_action", {"target": "무비온·소리랑", "action": "해지", "saving_monthly": 26300,
+                                                      "text": "안 쓰는 구독 두 개를 정리해요"}),
+                     lambda: _call("propose_action", {"target": "주말 배달", "action": "줄이기", "per_week": 1,
+                                                      "saving_monthly": 24240, "text": "토요일 배달을 한 번 줄여요"}),
+                     lambda: _call("handoff_to_reviewer", {"reason": "검산 부탁"})]
+            return steps[len(outs)]()
+        if role == "reviewer":
+            if not outs:
+                return _call("check_goal", {})
+            if len(outs) == 1:
+                seen["check"] = outs[0]
+                return _call("record_review", {"ok": outs[0]["feasible"], "reason": "남는 돈 + 제안으로 닿는다"})
+            return _call("handoff_to_counselor", {"reason": "통과"})
+        raise AssertionError(role)
+    return policy
+
+
+def test_onboarding_sets_report_and_goal_then_user_creates_it():
+    seen = {}
+    rec = dataclasses.asdict(run("P1", SwarmAgent(ScriptedLLM(onboarding_goal_policy(seen))), D(2026, 12, 6)))
+    fb = rec["feedbacks"][0]
+    meta = next(c for c in rec["calls"] if c["mode"] == "feedback")["meta"]
+    out = fb["output"]
+    assert [(t["from_agent"], t["to_agent"]) for t in meta["trace"]] == [
+        ("analyst", "counselor"), ("counselor", "strategist"), ("strategist", "reviewer"), ("reviewer", "counselor")]
+    assert out["report"]["monthly_leftover"] == 226566 and out["report"]["required_cut"] == 260000 - 226566
+    assert out["goal_proposal"] == P1_GOAL | {"monthly_required": 260000}           # 필요 월 저축액은 코드가 계산
+    assert seen["check"]["remaining_gap"] == 0 and seen["check"]["feasible"]
+    assert fb["validation_final"]["ok"] and [q["fact"] for q in fb["questions"]] == ["H2", "G1"]
+    assert rec["goal"] == P1_GOAL and rec["goal_source"] == "agent" and rec["goal_edits"] == []
+    assert not any(t["name"] == "check_goal" for t in fb["tools"][:meta["harness_tool_calls"]])
+    assert meta["tool_calls"] == sum(1 for t in fb["tools"][meta["harness_tool_calls"]:] if t["name"] != "check_goal")
+    assert '"목표": {"name": "일본 여행 (2주)"' in seen["weekly"]                        # 주간은 만든 목표를 기준으로
+    s = score(rec)
+    assert s["report"]["ok"] and s["goal"]["asked"] == ["goal"] and s["goal"]["monthly_required"] == 260000
+
+
+def _onboarding_ctx(today=ONBOARD):
+    from spending_agent.baseline.harness import FeedbackCtx, verify_feedback
+    from spending_agent.baseline.tools import ToolBox, View
+    from spending_agent.demo.generator import build_world, load_persona
+    from spending_agent.demo.responses import with_goal
+    p = with_goal(load_persona("P1"), None)
+    w = build_world(p)
+    box = ToolBox(View(p, w, list(w.batches["onboarding"]), today - dt.timedelta(days=1), today), max_questions=5)
+    return FeedbackCtx(today.isoformat(), "onboarding", "2026-12-06", box, lambda o: verify_feedback(o, box.results()))
+
+
+def test_onboarding_gates_need_report_numbers_and_goal_check():
+    agent, board, ctx = SwarmAgent(dry_run_llm()), Board(), _onboarding_ctx()
+    assert "set_report" in agent._c_propose_goal(ctx, board, P1_GOAL)["error"]              # 보고서 먼저
+    assert "300000" in agent._c_set_report(ctx, board, {"monthly_leftover": 300000})["error"]   # 계산 안 한 숫자
+    agent._c_calculate_many(ctx, board, {"expressions": ["(353500 + 145400 + 180800) // 3"]})
+    assert agent._c_set_report(ctx, board, {"monthly_leftover": 226566})["ok"]
+    assert "deadline" in agent._c_propose_goal(ctx, board, P1_GOAL | {"deadline": "4월 말"})["error"]
+    assert agent._c_propose_goal(ctx, board, P1_GOAL)["required_cut"] == 33434
+    assert "check_goal" in agent._c_record_review(ctx, board, {"ok": True, "reason": "좋다"})["error"]
+    assert "리뷰" in agent._respond(board, {"message": "목표안이에요"})["error"]            # 리뷰 전 목표안은 못 보낸다
+    check = agent._c_check_goal(ctx, board, {})
+    assert check["remaining_gap"] == 33434 and not check["feasible"]                     # 제안이 없으면 못 닿는다
+    assert agent._c_record_review(ctx, board, {"ok": True, "reason": "여지 없음, 남은 부족분 33,434원"})["ok"]
+    out = agent._respond(board, {"message": "목표안이에요"})["out"]
+    assert out["goal_proposal"]["monthly_required"] == 260000 and out["report"]["required_cut"] == 33434
+    agent._c_calculate_many(ctx, board, {"expressions": ["226566 - 10000"]})
+    agent._c_set_report(ctx, board, {"monthly_leftover": 216566})                           # 남는 돈이 바뀌면
+    assert board.goal_proposal == {} and board.review == {}                                # 목표안·리뷰를 다시 한다
