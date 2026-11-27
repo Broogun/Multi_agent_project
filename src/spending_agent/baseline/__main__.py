@@ -24,6 +24,13 @@ def _llm(kind: str, model: str):
     return dry_run_llm() if kind == "dry" else OpenAIResponses(model)
 
 
+def _agent(kind: str, llm_kind: str, model: str):
+    if kind == "swarm":                       # 에이전트 구조만 바꾸고 하네스·도구·채점은 같다
+        from ..agent import swarm
+        return swarm.SwarmAgent(swarm.dry_run_llm() if llm_kind == "dry" else OpenAIResponses(model))
+    return SingleAgent(_llm(llm_kind, model))
+
+
 def summary(s: dict) -> str:
     i, n, q, g, c = s["issues"], s["numbers"], s["questions"], s["suggestions"], s["cost"]
     lines = [
@@ -51,6 +58,8 @@ def main(argv: list[str] | None = None) -> None:
     r = sub.add_parser("run", help="페르소나 하나를 온보딩부터 끝까지 돌리고 채점한다")
     r.add_argument("persona")
     r.add_argument("--llm", choices=["dry", "openai"], required=True, help="dry: API 안 부르는 연습용")
+    r.add_argument("--agent", choices=["single", "swarm"], default="single",
+                   help="single: 싱글 에이전트 기준선, swarm: 압축 메모리 Swarm (agent.swarm)")
     r.add_argument("--model", default=os.environ.get("BASELINE_MODEL", DEFAULT_MODEL))
     r.add_argument("--until", type=dt.date.fromisoformat, help="이 날짜까지만 (예: 시연 기간 2026-12-14)")
     r.add_argument("--self-scale", choices=list(SELF_SCALES), default="중간",
@@ -64,10 +73,10 @@ def main(argv: list[str] | None = None) -> None:
 
     judge = OpenAIResponses(a.judge_model) if a.judge else None
     if a.cmd == "run":
-        rec = dataclasses.asdict(run(a.persona, SingleAgent(_llm(a.llm, a.model)), a.until, SELF_SCALES[a.self_scale]))
+        rec = dataclasses.asdict(run(a.persona, _agent(a.agent, a.llm, a.model), a.until, SELF_SCALES[a.self_scale]))
         result = score(rec, judge)
         RUNS.mkdir(parents=True, exist_ok=True)
-        path = RUNS / f"baseline_{a.persona}_single_{rec['model']}_{dt.datetime.now():%y%m%d-%H%M%S}.json"
+        path = RUNS / f"baseline_{a.persona}_{rec['agent']}_{rec['model']}_{dt.datetime.now():%y%m%d-%H%M%S}.json"
         path.write_text(json.dumps({**rec, "score": result}, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
     else:
         rec = json.loads(a.path.read_text(encoding="utf-8"))
