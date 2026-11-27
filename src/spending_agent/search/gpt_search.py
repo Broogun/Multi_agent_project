@@ -36,7 +36,6 @@ PATH_RULES: dict[str, tuple[str, ...]] = {
     "sk7mobile.com": ("/prod/data/callingplan",),
     "liivm.com": ("/rateplan/plans",),                 # /info/rateplan/ 은 판매중단 안내라 제외
     "direct.lghellovision.net": ("/rate/", "/usim/", "/esim/"),   # /event/ · /mgm/ · /with/ 제외
-    "moyoplan.com": ("/plans", "/calculator/plans-by-data"),     # /community · /tips · /gift-group 제외
     "kt.com": ("/wdic/productdetail", "/wdic/index"),
 }
 PLAN_HINTS = ("plan", "charge", "rate", "fee", "product", "요금")
@@ -45,15 +44,14 @@ EXCLUDE_HINTS = ("closed", "/corp", "infolte", "inforeliable")
 # 페이지를 열 수 없어서, 제목이 없을 때는 주소 경로로 이름을 붙인다 (경로 이름 기반, 확인된 페이지 제목이 아님)
 SITE_NAMES = {"smartchoice.or.kr": "스마트초이스", "mvnohub.kr": "알뜰폰허브", "ktmmobile.com": "KT M모바일",
               "uplusumobile.com": "U+유모바일", "sk7mobile.com": "SK7모바일", "liivm.com": "KB리브모바일",
-              "direct.lghellovision.net": "LG헬로모바일", "moyoplan.com": "모요",
+              "direct.lghellovision.net": "LG헬로모바일",
               "kt.com": "KT", "sktelecom.com": "SKT", "lguplus.com": "LG U+"}
 PATH_LABELS = (("plancompare", "요금제 비교"), ("catalog", "요금제 목록"), ("recomend_search", "맞춤 요금제 찾기"),
                ("prepay", "선불 요금제"), ("productdetail", "상품 상세"), ("feeplandetail", "요금제 상세"),
                ("callingplanview", "요금제 상세"), ("pricdetail", "요금제 상세"), ("callingplanlist", "요금제 목록"),
                ("priclist", "요금제 목록"), ("products", "요금제 목록"), ("/rateplan/plans", "요금제"),
                ("limit-plans", "요금제"), ("rateviewusim", "유심 요금제"), ("rateplan", "요금제 찾기"),
-               ("usimview", "유심 요금제"), ("everythingesim", "eSIM 요금제"), ("plans-by-data", "데이터별 요금제"),
-               ("/plans", "요금제"))
+               ("usimview", "유심 요금제"), ("everythingesim", "eSIM 요금제"))
 PANEL_TEXT = "이 조건으로 찾은 링크예요. 실제 요금과 조건은 각 사이트에서 확인하세요."
 EMPTY_TEXT = "조건에 맞는 링크를 찾지 못했어요. 조건을 바꿔 다시 찾아볼까요?"
 # 고정 링크: 검색 없이 항상 먼저 보여 주는 공공 비교 페이지 (비용 0, 매번 같음).

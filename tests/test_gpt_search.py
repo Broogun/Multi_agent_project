@@ -149,14 +149,18 @@ def test_pinned_first_and_same_page_not_repeated():
     assert [x["title"] for x in ev["sources"]] == ["스마트초이스 요금제 비교", "알뜰폰허브 요금제 목록", "SK7 유심 요금제"]
 
 
-def test_hellomobile_and_moyo_links_only_plan_pages():
-    ok = ["https://direct.lghellovision.net/rate/rateViewUsim.do", "https://direct.lghellovision.net/esim/everythingEsim.do?idx=1",
-          "https://www.moyoplan.com/plans/18763", "https://www.moyoplan.com/calculator/plans-by-data/recommended-one?data=15"]
+def test_hellomobile_plan_pages_only():
+    ok = ["https://direct.lghellovision.net/rate/rateViewUsim.do", "https://direct.lghellovision.net/esim/everythingEsim.do?idx=1"]
     bad = ["https://direct.lghellovision.net/event/viewEventDetailGuest.do?idxOfEvent=586",
-           "https://direct.lghellovision.net/mgm/rcmndmbr.do?pcode=1",
-           "https://www.moyoplan.com/community/questions/690c92d1/x", "https://www.moyoplan.com/tips/how_to_use",
-           "https://www.moyoplan.com/gift-group/2205"]
+           "https://direct.lghellovision.net/mgm/rcmndmbr.do?pcode=1"]
     assert all(path_allowed(u) for u in ok) and not any(path_allowed(u) for u in bad)
+
+
+def test_private_comparison_site_not_allowed():
+    from spending_agent.search.plan_spec import ALLOWED_DOMAINS
+    assert "moyoplan.com" not in [d["domain"] for d in ALLOWED_DOMAINS]
+    assert filter_sources([{"url": "https://www.moyoplan.com/plans/18763", "title": "x"}],
+                          [d["domain"] for d in ALLOWED_DOMAINS]) == []
 
 
 def test_ad_click_url_is_not_shown():

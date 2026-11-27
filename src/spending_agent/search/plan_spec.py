@@ -60,8 +60,8 @@ ALLOWED_DOMAINS: list[dict] = [
     {"domain": "sk7mobile.com", "name": "SK7모바일", "kind": "알뜰폰", "address_checked": True, "verified": False},
     {"domain": "liivm.com", "name": "KB리브모바일", "kind": "알뜰폰", "address_checked": True, "verified": False},
     {"domain": "direct.lghellovision.net", "name": "LG헬로모바일", "kind": "알뜰폰", "address_checked": True, "verified": False},
-    # 모요: 민간 비교 서비스. 링크만 보여 준다 (요금 데이터는 쓰지 않음). 공식 API 는 문의 후 제공 → 향후 과제
-    {"domain": "moyoplan.com", "name": "모요", "kind": "비교", "address_checked": True, "verified": False},
+    # 민간 비교 서비스(모요 등)는 넣지 않는다: 우리 기능과 역할이 겹치고, 제휴 상품이 앞에 나와 중립이 깨진다.
+    # 공공 비교(스마트초이스·알뜰폰허브)로 충분하다. 모요 공식 API(문의 후 제공)는 향후 과제로 따로 검토.
     {"domain": "sktelecom.com", "name": "SKT", "kind": "통신사", "address_checked": False, "verified": False},
     {"domain": "kt.com", "name": "KT", "kind": "통신사", "address_checked": True, "verified": False},
     {"domain": "lguplus.com", "name": "LG U+", "kind": "통신사", "address_checked": True, "verified": False},
