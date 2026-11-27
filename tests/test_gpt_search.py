@@ -15,6 +15,7 @@ from spending_agent.search.gpt_search import (
     is_file_or_landing,
     page_key,
     path_allowed,
+    pinned_panel,
 )
 
 ALLOWED = ["smartchoice.or.kr", "kt.com"]
@@ -130,3 +131,19 @@ def test_mvno_plan_paths_pass_and_events_do_not():
     allowed = ["mvnohub.kr", "sk7mobile.com"]
     out = filter_sources([{"url": ok[3], "title": ""}, {"url": ok[0], "title": ""}], allowed, official={"mvnohub.kr"})
     assert [s["title"] for s in out] == ["알뜰폰허브 요금제 목록", "SK7모바일 요금제 상세"]       # 공공 먼저
+
+
+def test_pinned_panel_needs_no_api():
+    ev = pinned_panel("mobile_plan")
+    assert [x["title"] for x in ev["sources"]] == ["스마트초이스 요금제 비교", "알뜰폰허브 요금제 목록"]
+    assert ev["notice"] == SEARCH_NOTICE and pinned_panel("없는주제")["sources"] == []
+
+
+def test_pinned_first_and_same_page_not_repeated():
+    resp = NS(output=[NS(type="web_search_call", action=NS(sources=[
+        NS(url="https://m.smartchoice.or.kr/smc/plan/planCompare.do?type=m", title=""),      # 고정 링크와 같은 페이지
+        NS(url="https://www.sk7mobile.com/prod/data/callingPlanList.do?refCode=USIM", title="SK7 유심 요금제"),
+    ]))])
+    allowed = ["smartchoice.or.kr", "mvnohub.kr", "sk7mobile.com"]
+    ev = GPTSearch(model="m", client=FakeClient(resp)).panel("q", allowed, topic="mobile_plan")
+    assert [x["title"] for x in ev["sources"]] == ["스마트초이스 요금제 비교", "알뜰폰허브 요금제 목록", "SK7 유심 요금제"]

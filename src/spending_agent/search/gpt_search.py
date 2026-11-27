@@ -51,6 +51,15 @@ PATH_LABELS = (("plancompare", "요금제 비교"), ("catalog", "요금제 목�
                ("limit-plans", "요금제"))
 PANEL_TEXT = "이 조건으로 찾은 링크예요. 실제 요금과 조건은 각 사이트에서 확인하세요."
 EMPTY_TEXT = "조건에 맞는 링크를 찾지 못했어요. 조건을 바꿔 다시 찾아볼까요?"
+# 고정 링크: 검색 없이 항상 먼저 보여 주는 공공 비교 페이지 (비용 0, 매번 같음).
+# 261127 실제 검색 결과에서 나온 주소만 넣었다. 주소가 바뀌면 주기 검사(L3)로 고친다.
+PINNED: dict[str, list[SearchSource]] = {
+    "mobile_plan": [
+        {"title": "스마트초이스 요금제 비교", "uri": "https://www.smartchoice.or.kr/smc/plan/planCompare.do"},
+        {"title": "알뜰폰허브 요금제 목록", "uri": "https://www.mvnohub.kr/product/products.do"},
+    ],
+}
+PINNED_TEXT = "공공 요금제 비교 사이트예요. 실제 요금과 조건은 각 사이트에서 확인하세요."
 INSTRUCTIONS = ("허용된 사이트에서 조건에 맞는 요금제 안내 페이지를 찾아라. 가격을 단정하지 말고, "
                 "판매처에서 확인하라고 안내하라.")
 
@@ -172,6 +181,20 @@ def extract_sources(response: Any) -> list[dict]:
     return raw
 
 
+def merge_pinned(pinned: list[SearchSource], found: list[SearchSource]) -> list[SearchSource]:
+    """고정 링크를 앞에 두고, 검색 결과에서 같은 페이지는 뺀다."""
+    keys = {page_key(x["uri"]) for x in pinned}
+    return list(pinned) + [x for x in found if page_key(x["uri"]) not in keys][:MAX_LINKS]
+
+
+def pinned_panel(topic: str) -> SearchPanelEvent:
+    """검색 없이 고정 링크만 띄운다 (API 호출 없음)."""
+    links = list(PINNED.get(topic, []))
+    return {"type": "search_panel", "panel_id": panel_id(topic, links), "query": topic,
+            "text": PINNED_TEXT if links else EMPTY_TEXT, "suggestions_html": None, "sources": links,
+            "notice": SEARCH_NOTICE}
+
+
 def panel_id(query: str, sources: list[SearchSource]) -> str:
     return hashlib.sha1((query + "|" + "|".join(s["uri"] for s in sources)).encode()).hexdigest()[:12]
 
@@ -187,7 +210,8 @@ class GPTSearch:
             client = OpenAI()
         self.model, self.client, self.official = model, client, official or set()
 
-    def panel(self, query: str, allowed_domains: list[str]) -> SearchPanelEvent:
+    def panel(self, query: str, allowed_domains: list[str], topic: str | None = None) -> SearchPanelEvent:
+        """topic 이 있으면 그 고정 링크를 먼저 두고 검색 결과를 뒤에 붙인다 ("더 찾아보기")."""
         if not query or not allowed_domains:
             raise ValueError("검색어와 허용 도메인이 있어야 한다 (허용 목록 없이 전체 웹을 찾지 않는다)")
         resp = self.client.responses.create(
@@ -199,6 +223,9 @@ class GPTSearch:
             input=query,
         )
         sources = filter_sources(extract_sources(resp), allowed_domains, self.official)
+        pinned = PINNED.get(topic or "", [])
+        if pinned:
+            sources = merge_pinned(pinned, sources)
         return {"type": "search_panel", "panel_id": panel_id(query, sources), "query": query,
                 "text": PANEL_TEXT if sources else EMPTY_TEXT, "suggestions_html": None,
                 "sources": sources, "notice": SEARCH_NOTICE}
