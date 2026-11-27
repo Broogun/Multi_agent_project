@@ -26,6 +26,7 @@ PAGE_ACTIONS = ("open_page", "find_in_page")     # 결과 페이지를 열어 �
 TRACKING_PREFIXES = ("utm_", "gad_")
 TRACKING_KEYS = {"gclid", "gbraid", "wbraid", "fbclid", "ref", "ref_src", "source"}
 MAX_LINKS = 8
+MAX_PER_SITE = 2      # 한 사이트가 결과를 채우지 않게 (여러 사업자를 고르게)
 # 같은 페이지의 모바일·API 주소는 하나로 본다
 HOST_ALIASES = ("www.", "m.", "mobile.", "api.")
 VIEW_PARAMS = {"type"}            # 화면 전환용 파라미터 (같은 페이지)
@@ -114,6 +115,12 @@ def is_file_or_landing(url: str) -> bool:
     return len(segs) <= 1 and not sp.query and (not segs or sp.path.endswith("/"))   # 홈 · 첫 화면 (/, /smc/)
 
 
+def _site(url: str, allowed: list[str]) -> str:
+    """사이트 단위 (허용 도메인 기준). family.uplusumobile.com 과 www.uplusumobile.com 은 같은 사이트."""
+    h = _host(url)
+    return next((d for d in allowed if h == d or h.endswith("." + d)), h)
+
+
 def path_allowed(url: str, rules: dict[str, tuple[str, ...]] | None = None) -> bool:
     """도메인별 경로 규칙이 있으면 그 경로만, 없으면 요금제 단서가 있는 경로만 통과."""
     rules = PATH_RULES if rules is None else rules
@@ -167,7 +174,15 @@ def filter_sources(raw: list[dict], allowed: list[str], official: set[str] | Non
         rank = 0 if any(_host(u) == d or _host(u).endswith("." + d) for d in official) else 1
         out.append((rank, i, {"title": title, "uri": u}))
     out.sort(key=lambda t: (t[0], t[1]))
-    return [s for _, _, s in out][:MAX_LINKS]
+    per_site: dict[str, int] = {}
+    kept: list[SearchSource] = []
+    for _, _, src in out:
+        site = _site(src["uri"], allowed)
+        if per_site.get(site, 0) >= MAX_PER_SITE:
+            continue
+        per_site[site] = per_site.get(site, 0) + 1
+        kept.append(src)
+    return kept[:MAX_LINKS]
 
 
 def _get(o: Any, k: str, default=None):
@@ -193,7 +208,7 @@ def extract_sources(response: Any) -> list[dict]:
 def merge_pinned(pinned: list[SearchSource], found: list[SearchSource]) -> list[SearchSource]:
     """고정 링크를 앞에 두고, 검색 결과에서 같은 페이지는 뺀다."""
     keys = {page_key(x["uri"]) for x in pinned}
-    return list(pinned) + [x for x in found if page_key(x["uri"]) not in keys][:MAX_LINKS]
+    return list(pinned) + [x for x in found if page_key(x["uri"]) not in keys][:MAX_LINKS]    # 상한은 found 에 이미 적용
 
 
 def pinned_panel(topic: str) -> SearchPanelEvent:

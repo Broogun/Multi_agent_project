@@ -195,3 +195,12 @@ def test_page_opening_result_is_rejected():
     with pytest.raises(RuntimeError):
         g.panel("q", ALLOWED)
     assert g.last_actions == ["search", "open_page"]
+
+
+def test_at_most_two_links_per_site():
+    raw = [{"url": f"https://www.sk7mobile.com/prod/data/callingPlanView.do?prodCd=PD{i}", "title": f"SK7 {i}"} for i in range(6)]
+    raw += [{"url": "https://family.uplusumobile.com/product/pric/usim/pricList", "title": "U+ 1"},
+            {"url": "https://www.uplusumobile.com/product/pric/pricDetail?seq=1", "title": "U+ 2"},
+            {"url": "https://www.uplusumobile.com/product/pric/pricDetail?seq=2", "title": "U+ 3"}]
+    out = filter_sources(raw, ["sk7mobile.com", "uplusumobile.com"])
+    assert [s["title"] for s in out] == ["SK7 0", "SK7 1", "U+ 1", "U+ 2"]
