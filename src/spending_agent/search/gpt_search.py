@@ -24,6 +24,9 @@ MONEY = re.compile(r"[₩￦]\s*\d|\d[\d,.]*\s*(원|만|천|krw)|\bkrw\b", re.IG
 # 구분자 없는 전화번호(01012345678)·카드·계좌번호처럼 긴 숫자열
 LONG_DIGITS = re.compile(r"(?<!\d)(?:0\d{8,10}|\d{9,})(?!\d)")
 MAX_QUERY_LEN = 100
+EXPIRED = re.compile(r"판매\s*종료|판매\s*중단|종료|마감|단종")
+# 검색어의 숫자는 단위가 붙은 스펙만 허용한다 (예: 10GB, 3Mbps, 200분). 단위 없는 숫자는 금액·번호일 수 있어 거부
+SPEC_NUMBER = re.compile(r"\d+(?:\.\d+)?\s*(?:gb|mb|mbps|kbps|분|건|개월|시간|일|g)(?![a-z])", re.IGNORECASE)
 PAGE_ACTIONS = ("open_page", "find_in_page")     # 결과 페이지를 열어 읽는 동작
 TRACKING_PREFIXES = ("utm_", "gad_")
 TRACKING_KEYS = {"gclid", "gbraid", "wbraid", "fbclid", "ref", "ref_src", "source"}
@@ -150,31 +153,41 @@ def in_allowed(url: str, allowed: list[str]) -> bool:
     return any(h == d or h.endswith("." + d) for d in allowed)
 
 
+def short_title(title: str) -> str:
+    """종료·마감 표시가 있으면 앞에 '[확인 필요]' 를 붙여 남기고, 길면 줄인다 (docs/06 기준일)."""
+    flag = "[확인 필요] " if EXPIRED.search(title) else ""
+    room = MAX_TITLE - len(flag)
+    body = title if len(title) <= room else title[:room - 1].rstrip() + "…"
+    return flag + body
+
+
 def rank_sources(raw: list[dict], allowed: list[str], official: set[str] | None = None,
                  path_rules: dict[str, tuple[str, ...]] | None = None) -> list[SearchSource]:
     """표시 전 필터 (상한 전). raw: [{"url", "title"}]. 순서는 공식 먼저, 그다음 원래 순서."""
     official = official or set()
-    titles: dict[str, str] = {}               # 같은 페이지에 제목이 있는 출처가 있으면 그 제목을 쓴다
+    def ok(url: str) -> str | None:
+        """허용 도메인·경로를 통과한 정리된 주소, 아니면 None."""
+        if not url.startswith(("http://", "https://")) or not in_allowed(url, allowed):
+            return None
+        u = clean_url(url)
+        return None if is_file_or_landing(u) or not path_allowed(u, path_rules) else u
+
+    titles: dict[str, str] = {}               # 통과한 출처의 제목만 쓴다 (걸러진 출처가 제목을 덮어쓰지 않게)
     for r in raw:
-        t, url = (r.get("title") or "").strip(), r.get("url") or ""
-        if t and url and t != url and not t.startswith("http"):
-            titles.setdefault(page_key(clean_url(url)), t)
+        t, u = (r.get("title") or "").strip(), ok(r.get("url") or "")
+        if t and u and t != u and not t.startswith("http"):
+            titles.setdefault(page_key(u), t)
     seen: set[str] = set()
     out: list[tuple[int, int, SearchSource]] = []
     for i, r in enumerate(raw):
-        url = r.get("url") or ""
-        if not url.startswith(("http://", "https://")) or not in_allowed(url, allowed):
-            continue
-        u = clean_url(url)
-        if is_file_or_landing(u) or not path_allowed(u, path_rules):
+        u = ok(r.get("url") or "")
+        if u is None:
             continue
         key = page_key(u)                    # m.·www.·api.·type=m 만 다른 주소는 같은 페이지
         if key in seen:
             continue
         seen.add(key)
-        title = titles.get(key) or label_for(u, allowed)
-        if len(title) > MAX_TITLE:
-            title = title[:MAX_TITLE - 1].rstrip() + "…"
+        title = short_title(titles.get(key) or label_for(u, allowed))
         rank = 0 if any(_host(u) == d or _host(u).endswith("." + d) for d in official) else 1
         out.append((rank, i, {"title": title, "uri": u}))
     out.sort(key=lambda t: (t[0], t[1]))
@@ -243,6 +256,8 @@ def safe_query(query: str) -> str:
         raise ValueError("검색어가 비었다")
     if MONEY.search(q):
         raise ValueError("검색어에 금액(재무 정보)을 넣지 않는다")
+    if re.search(r"\d", SPEC_NUMBER.sub("", q)):
+        raise ValueError("검색어에는 단위가 붙은 스펙 숫자만 넣는다 (번호·금액일 수 있는 숫자 거부)")
     return q[:MAX_QUERY_LEN]
 
 
@@ -261,7 +276,8 @@ class GPTSearch:
             client = OpenAI()
         self.model, self.client, self.official = model, client, official or set()
         self.last_actions: list = []
-        self.last_more: list[SearchSource] = []     # 상한으로 접힌 링크 ("N건 더 보기"). 저장하지 않는다
+        self.last_more: list[SearchSource] = []
+        self.last_shown = 0     # 상한으로 접힌 링크 ("N건 더 보기"). 저장하지 않는다
 
     def panel(self, query: str, allowed_domains: list[str], topic: str | None = None) -> SearchPanelEvent:
         """topic 이 있으면 그 고정 링크를 먼저 두고 검색 결과를 뒤에 붙인다 ("더 찾아보기")."""
@@ -286,8 +302,11 @@ class GPTSearch:
             raise RuntimeError(f"검색 중 페이지를 열었다 ({self.last_actions}). 결과를 쓰지 않는다 (docs/06)")
         ranked = rank_sources(extract_sources(resp), allowed_domains, self.official)
         pinned = [x for x in PINNED.get(topic or "", []) if in_allowed(x["uri"], allowed_domains)]   # 고정 링크도 허용 도메인 안에서만
-        sources, self.last_more = apply_caps(pinned, ranked, allowed_domains)
-        # ⚠️ SearchPanelEvent 계약에는 '더 보기' 칸이 없다. 계약 변경(팀 합의) 전까지는 last_more 로만 넘긴다.
+        shown, self.last_more = apply_caps(pinned, ranked, allowed_domains)
+        # SearchPanelEvent 계약에 '더 보기' 칸이 생기기 전까지는 접힌 링크도 sources 뒤에 붙여 보낸다 (숨기지 않음, docs/06).
+        # 앞의 len(shown) 개가 처음에 보일 링크다 (self.last_shown).
+        self.last_shown = len(shown)
+        sources = shown + self.last_more
         return {"type": "search_panel", "panel_id": panel_id(query, sources), "query": query,
                 "text": PANEL_TEXT if sources else EMPTY_TEXT, "suggestions_html": None,
                 "sources": sources, "notice": SEARCH_NOTICE}

@@ -217,7 +217,8 @@ def test_pinned_counts_toward_site_cap_and_subdomain_pages_merge():
     allowed = ["smartchoice.or.kr", "mvnohub.kr", "uplusumobile.com"]
     ev = GPTSearch(model="m", client=FakeClient(resp)).panel("q", allowed, topic="mobile_plan")
     titles = [x["title"] for x in ev["sources"]]
-    assert titles == ["스마트초이스 요금제 비교", "알뜰폰허브 요금제 목록", "알뜰폰허브 요금제 상세", "U+ 목록"]
+    assert titles == ["스마트초이스 요금제 비교", "알뜰폰허브 요금제 목록", "알뜰폰허브 요금제 상세", "U+ 목록",
+                      "알뜰폰허브 요금제 상세"]                       # 마지막은 상한으로 접힌 링크 (뒤에 붙음)
 
 
 def test_long_titles_are_shortened():
@@ -229,7 +230,8 @@ def test_long_titles_are_shortened():
 
 def test_query_guard_catches_more_pii_and_money():
     assert "01012345678" not in safe_query("알뜰폰 요금제 01012345678 월 10GB")
-    assert "1234567812345678" not in safe_query("요금제 1234567812345678 월 10GB")
+    with pytest.raises(ValueError):                                   # 지우다 남은 숫자 조각도 보내지 않는다
+        safe_query("요금제 1234567812345678 월 10GB")
     assert safe_query("알뜰폰 요금제 월 10GB 소진 후 3Mbps") == "알뜰폰 요금제 월 10GB 소진 후 3Mbps"   # 스펙 숫자는 그대로
     for bad in ["월 ₩65780 이하", "월 6만 5천 이하", "요금제 30000 KRW", "월 5만 이하"]:
         with pytest.raises(ValueError):
@@ -240,5 +242,25 @@ def test_overflow_links_are_kept_for_more_view():
     raw = [NS(url=f"https://www.sk7mobile.com/prod/data/callingPlanView.do?prodCd=PD{i}", title=f"SK7 {i}") for i in range(4)]
     g = GPTSearch(model="m", client=FakeClient(NS(output=[NS(type="web_search_call", action=NS(sources=raw))])))
     ev = g.panel("q", ["sk7mobile.com"])
-    assert [x["title"] for x in ev["sources"]] == ["SK7 0", "SK7 1"]
-    assert [x["title"] for x in g.last_more] == ["SK7 2", "SK7 3"]          # 지우지 않고 '더 보기'로
+    assert [x["title"] for x in ev["sources"]] == ["SK7 0", "SK7 1", "SK7 2", "SK7 3"]   # 숨기지 않고 뒤에
+    assert g.last_shown == 2 and [x["title"] for x in g.last_more] == ["SK7 2", "SK7 3"]
+
+
+def test_bare_numbers_rejected_spec_numbers_kept():
+    assert safe_query("알뜰폰 요금제 월 10GB 소진 후 3Mbps 통화 200분") == "알뜰폰 요금제 월 10GB 소진 후 3Mbps 통화 200분"
+    for bad in ["요금제 010 1234 5678 월 10GB", "요금제 010.1234.5678", "요금제 예산 65,780 이하", "요금제 30000"]:
+        with pytest.raises(ValueError):
+            safe_query(bad)
+
+
+def test_rejected_source_cannot_supply_title():
+    raw = [{"url": "https://other.lghellovision.net/rate/rateViewUsim.do", "title": "가짜 제목"},
+           {"url": "https://direct.lghellovision.net/rate/rateViewUsim.do", "title": ""}]
+    out = filter_sources(raw, ["direct.lghellovision.net"])
+    assert [x["title"] for x in out] == ["LG헬로모바일 유심 요금제"]
+
+
+def test_expired_marker_survives_shortening():
+    out = filter_sources([{"url": "https://www.sk7mobile.com/prod/data/callingPlanView.do?prodCd=PD1",
+                           "title": "LTE 유심 요금제 아주 긴 이름의 프로모션 상품 안내 페이지 (판매종료)"}], ["sk7mobile.com"])
+    assert out[0]["title"].startswith("[확인 필요]") and len(out[0]["title"]) <= 40
