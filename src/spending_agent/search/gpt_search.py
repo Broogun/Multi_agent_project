@@ -12,11 +12,17 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from ..agent.tools import PII
 from ..contracts import SEARCH_NOTICE, SearchPanelEvent, SearchSource
 
+# 검색어에 금액(지금 통신비 등 재무 정보)이 있으면 보내지 않는다 (docs/06)
+MONEY = re.compile(r"\d[\d,]*\s*(원|만\s*원|천\s*원)|\d+\s*만원")
+MAX_QUERY_LEN = 100
+PAGE_ACTIONS = ("open_page", "find_in_page")     # 결과 페이지를 열어 읽는 동작
 TRACKING_PREFIXES = ("utm_", "gad_")
 TRACKING_KEYS = {"gclid", "gbraid", "wbraid", "fbclid", "ref", "ref_src", "source"}
 MAX_LINKS = 8
@@ -198,6 +204,16 @@ def pinned_panel(topic: str) -> SearchPanelEvent:
             "notice": SEARCH_NOTICE}
 
 
+def safe_query(query: str) -> str:
+    """외부로 보내기 전 마지막 검사. 개인정보는 지우고, 금액이 있으면 거부한다."""
+    q = " ".join(PII.sub("", query or "").split())
+    if not q:
+        raise ValueError("검색어가 비었다")
+    if MONEY.search(q):
+        raise ValueError("검색어에 금액(재무 정보)을 넣지 않는다")
+    return q[:MAX_QUERY_LEN]
+
+
 def panel_id(query: str, sources: list[SearchSource]) -> str:
     return hashlib.sha1((query + "|" + "|".join(s["uri"] for s in sources)).encode()).hexdigest()[:12]
 
@@ -212,21 +228,31 @@ class GPTSearch:
             from .. import config  # noqa: F401  (.env 로딩)
             client = OpenAI()
         self.model, self.client, self.official = model, client, official or set()
+        self.last_actions: list = []
 
     def panel(self, query: str, allowed_domains: list[str], topic: str | None = None) -> SearchPanelEvent:
         """topic 이 있으면 그 고정 링크를 먼저 두고 검색 결과를 뒤에 붙인다 ("더 찾아보기")."""
-        if not query or not allowed_domains:
-            raise ValueError("검색어와 허용 도메인이 있어야 한다 (허용 목록 없이 전체 웹을 찾지 않는다)")
+        if not allowed_domains:
+            raise ValueError("허용 도메인이 있어야 한다 (허용 목록 없이 전체 웹을 찾지 않는다)")
+        query = safe_query(query)
         resp = self.client.responses.create(
             model=self.model,
             tools=[{"type": "web_search", "filters": {"allowed_domains": list(allowed_domains)}}],
             tool_choice="required",
             include=["web_search_call.action.sources"],
+            store=False,                         # 응답을 OpenAI 서버에 저장하지 않는다 (기본값은 저장)
+            # 추론을 켜면 모델이 결과 페이지를 열어 읽는다 (open_page · find_in_page, 261127 실측).
+            # effort none 이면 검색(search)만 한다 (실측). 링크된 페이지를 열지 않는다는 docs/06 을 지키려고 끈다.
+            reasoning={"effort": "none"},
             instructions=INSTRUCTIONS,
             input=query,
         )
+        self.last_actions = [_get(_get(i, "action", {}) or {}, "type") for i in (_get(resp, "output", []) or [])
+                             if _get(i, "type") == "web_search_call"]
+        if any(a in PAGE_ACTIONS for a in self.last_actions):
+            raise RuntimeError(f"검색 중 페이지를 열었다 ({self.last_actions}). 결과를 쓰지 않는다 (docs/06)")
         sources = filter_sources(extract_sources(resp), allowed_domains, self.official)
-        pinned = PINNED.get(topic or "", [])
+        pinned = [x for x in PINNED.get(topic or "", []) if in_allowed(x["uri"], allowed_domains)]   # 고정 링크도 허용 도메인 안에서만
         if pinned:
             sources = merge_pinned(pinned, sources)
         return {"type": "search_panel", "panel_id": panel_id(query, sources), "query": query,

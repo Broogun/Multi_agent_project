@@ -16,6 +16,7 @@ from spending_agent.search.gpt_search import (
     page_key,
     path_allowed,
     pinned_panel,
+    safe_query,
 )
 
 ALLOWED = ["smartchoice.or.kr", "kt.com"]
@@ -69,6 +70,8 @@ def test_panel_shows_links_only_not_model_text():
     assert ev["suggestions_html"] is None and ev["sources"] and len(ev["panel_id"]) == 12
     call = client.calls[0]
     assert call["tools"][0]["filters"]["allowed_domains"] == ALLOWED and call["input"] == "알뜰폰 요금제 월 10GB 이상"
+    assert call["store"] is False                                       # 서버 저장 안 함
+    assert call["reasoning"] == {"effort": "none"}                      # 페이지를 열지 않게
 
 
 def test_empty_result_message():
@@ -167,3 +170,28 @@ def test_ad_click_url_is_not_shown():
     ad = "https://www.google.com/aclk?sa=L&adurl=https://www.moyoplan.com?utm_source%3Dgoogle"
     assert filter_sources([{"url": ad, "title": "광고"}], ["moyoplan.com"]) == []          # 광고 리다이렉트는 허용 도메인 밖
     assert clean_url("https://www.moyoplan.com/plans/1?utm_source=google&gclid=x&gad_source=1") ==         "https://www.moyoplan.com/plans/1"
+
+
+def test_query_guard_strips_pii_and_rejects_money():
+    assert safe_query("알뜰폰 요금제 010-1234-5678 a@b.com 월 10GB") == "알뜰폰 요금제 월 10GB"
+    for bad in ["알뜰폰 요금제 월 65,780원 이하", "요금제 3만원 이하", "요금제 3 만 원", ""]:
+        with pytest.raises(ValueError):
+            safe_query(bad)
+    client = FakeClient(NS(output=[]))
+    with pytest.raises(ValueError):
+        GPTSearch(model="m", client=client).panel("요금제 월 55,000원", ALLOWED)
+    assert client.calls == []                                           # 보내기 전에 막는다
+
+
+def test_pinned_links_respect_allowlist():
+    ev = GPTSearch(model="m", client=FakeClient(NS(output=[]))).panel("q", ["sk7mobile.com"], topic="mobile_plan")
+    assert ev["sources"] == []
+
+
+def test_page_opening_result_is_rejected():
+    resp = NS(output=[NS(type="web_search_call", action=NS(type="search", sources=[])),
+                      NS(type="web_search_call", action=NS(type="open_page", url="https://kt.com/x"))])
+    g = GPTSearch(model="m", client=FakeClient(resp))
+    with pytest.raises(RuntimeError):
+        g.panel("q", ALLOWED)
+    assert g.last_actions == ["search", "open_page"]
