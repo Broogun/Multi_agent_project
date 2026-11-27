@@ -6,7 +6,7 @@ import datetime as dt
 import json
 
 from spending_agent.agent.memory import MAX_BOUNCE, MAX_HOPS, Board
-from spending_agent.agent.swarm import SwarmAgent, dry_run_llm
+from spending_agent.agent.swarm import FALLBACK_MESSAGE, SwarmAgent, calculated_numbers, dry_run_llm
 from spending_agent.baseline import __main__ as cli
 from spending_agent.baseline.harness import run
 from spending_agent.baseline.llm import ScriptedLLM, Step, ToolCall, tool_outputs
@@ -106,7 +106,9 @@ def test_pre_run_flags_rules_before_llm():
     assert [t["name"] for t in weekly["tools"][:4]] == ["recurring_payments", "card_bills", "goal_progress",
                                                        "unnamed_transfers"]
     first_weekly = next(t for t in seen if "주간 피드백" in t or "웹툰패스" in t)
-    assert "웹툰패스" in first_weekly and "가격 변화" in first_weekly            # C05 · C04 신호가 작업판에 먼저 올라감
+    board = json.loads(first_weekly.split("[작업판]\n", 1)[1].split("\n[받은 바통]", 1)[0])["규칙 전처리"]
+    assert [x["merchant"] for x in board["새 결제(온보딩 이후 처음)"]] == ["웹툰패스"]           # C05
+    assert {"merchant": "씨네박스", "month": "2026-11", "from": 9900, "to": 12900, "diff": 3000} in board["가격 변화"]  # C04
     assert "regular" in first_weekly                                           # 정형 이체 표시 (질문 낭비 줄이기)
 
 
@@ -147,7 +149,7 @@ def test_invented_numbers_are_refused():
             if not outs:
                 return _call("propose_action", {"target": "배달", "action": "줄이기", "per_week": 1,
                                                 "saving_monthly": 123457, "text": "배달 줄이기"})
-            assert outs[0]["ok"] is False and "도구 결과" in outs[0]["error"]
+            assert outs[0]["ok"] is False and "계산" in outs[0]["error"]
             return _call("handoff_to_counselor", {"reason": "근거 있는 후보 없음"})
         return _call("respond_to_user", {"message": "이번엔 제안 없이 정리만 할게요."})
 
@@ -201,16 +203,22 @@ def test_cli_runs_swarm(tmp_path, monkeypatch, capsys):
 
 
 # ------------------------------------------------------------------ Codex 리뷰 반영
-def test_decimal_fragments_are_not_allowed_numbers():
-    from spending_agent.agent.swarm import _numbers
-    assert 75 not in _numbers({"result": 0.75}) and 0 not in _numbers({"result": 0.75})
-    assert {1234567, 240000, 3} <= _numbers({"calc": "1,234,567 − 240,000.0 = 3"})
+def _ok(name, value):
+    return {"name": name, "output": {"status": "ok", "value": value}}
+
+
+def test_only_calculated_values_are_allowed():
+    log = [_ok("list_transactions", {"rows": [{"날짜": "2026-12-12", "거래ID": "T13700", "금액": -26800}]}),
+           _ok("check_gap_coverage", {"remaining_gap": 13700}),
+           _ok("calculate", {"result": 0.75}), _ok("calculate", {"result": 24240}),
+           _ok("forecast_goal", {"monthly_required": 240000, "gap": 1200000, "months_left": 5})]
+    assert calculated_numbers(log) == {24240, 240000, 1200000}       # 날짜·거래ID·개별 금액·검산 기록·소수는 안 됨
 
 
 def test_changing_proposals_clears_stale_gap():
     from types import SimpleNamespace
     agent = SwarmAgent(ScriptedLLM(lambda *a: Step()))
-    ctx = SimpleNamespace(tools=SimpleNamespace(results=lambda: [{"value": {"result": 10000}}]))
+    ctx = SimpleNamespace(tools=SimpleNamespace(log=[_ok("calculate", {"result": 10000})]))
     b = Board(proposals=[{"saving_monthly": 40000}], gap={"covered": True, "proposed_saving_sum": 40000},
               review={"ok": True})
     agent._c_drop_action(ctx, b, {"index": 0})
@@ -241,3 +249,118 @@ def test_swarm_dry_run_ends_with_response():
     metas = [c["meta"] for c in rec["calls"] if c["mode"] == "feedback"]
     assert all(not m["forced"] and m["hops"] == 1 for m in metas)
     assert all(f["output"]["message"] == "내역을 확인했어요." for f in rec["feedbacks"])
+
+
+# ------------------------------------------------------------------ PR #17 리뷰 반영 (KIM-YUNHO)
+def _ctx(*log):
+    from types import SimpleNamespace
+    return SimpleNamespace(today="2026-12-13", tools=SimpleNamespace(log=list(log)))
+
+
+def test_uncalculated_saving_and_shortfall_are_refused():
+    agent = SwarmAgent(ScriptedLLM(lambda *a: Step()))
+    ctx = _ctx(_ok("check_gap_coverage", {"remaining_gap": 13700}),
+               _ok("list_transactions", {"rows": [{"날짜": "2026-12-12"}]}))
+    b = Board()
+    r = agent._c_propose_action(ctx, b, {"target": "배달", "action": "줄이기", "saving_monthly": 13700, "text": "x"})
+    assert r["ok"] is False and b.proposals == []                    # 검산 기록의 남은 부족분을 그대로 쓰면 안 됨
+    assert agent._c_check_gap_coverage(ctx, b, {"monthly_shortfall": 12})["ok"] is False     # 날짜 조각
+
+
+def test_switch_and_goal_adjust_carry_strengths():
+    agent = SwarmAgent(ScriptedLLM(lambda *a: Step()))
+    ctx, b = _ctx(_ok("calculate", {"result": 9000})), Board()
+    bad = agent._c_propose_action(ctx, b, {"target": "카페", "action": "바꾸기", "saving_monthly": 9000, "text": "x"})
+    assert bad["ok"] is False                                        # 바꾸기는 to 필요
+    assert agent._c_propose_action(ctx, b, {"target": "카페", "action": "바꾸기", "to": "집커피", "saving_monthly": 9000,
+                                            "text": "집커피로"})["ok"]
+    assert agent._c_propose_action(ctx, b, {"target": "여행", "action": "목표 조정", "deadline": "2027-06-30",
+                                            "text": "두 달 미루기"})["ok"]
+    b.review = {"ok": True}
+    out = SwarmAgent._approved(b)
+    assert out[0]["to"] == "집커피" and out[1]["deadline"] == "2027-06-30" and "saving_monthly" not in out[1]
+
+
+def test_review_string_false_is_rejection():
+    agent = SwarmAgent(ScriptedLLM(lambda *a: Step()))
+    b = Board(proposals=[{"saving_monthly": 1}], gap={"covered": False})
+    agent._c_record_review(_ctx(), b, {"ok": "false", "reason": "부족"})
+    assert b.review["ok"] is False and agent._approved(b) == []
+
+
+def test_suggestion_text_with_bad_number_is_fixed_by_counselor():
+    seen = []
+
+    def policy(system, transcript, tools):
+        if not tools:
+            return _understand_reply()
+        role, outs = _role(system), tool_outputs(transcript)
+        if role == "analyst":
+            return _call("handoff_to_strategist", {"reason": "대안"})
+        if role == "strategist":
+            if not outs:
+                return _call("calculate", {"expression": "242400 / 10"})
+            if len(outs) == 1:
+                return _call("propose_action", {"target": "주말 배달", "action": "줄이기", "per_week": 1,
+                                                "saving_monthly": 24240, "text": "주 1회 줄이면 매달 77,777원"})
+            return _call("handoff_to_reviewer", {"reason": "검증"})
+        if role == "reviewer":
+            if not outs:
+                return _call("calculate", {"expression": "24240 * 1"})
+            if len(outs) == 1:
+                return _call("check_gap_coverage", {"monthly_shortfall": 24240})
+            if len(outs) == 2:
+                return _call("record_review", {"ok": True, "reason": "충분"})
+            return _call("handoff_to_counselor", {"reason": "통과"})
+        seen.append(transcript[0]["text"])
+        if len(seen) == 2 and not outs:
+            return _call("edit_suggestion_text", {"index": 0, "text": "주 1회만 줄여 볼까요?"})
+        return _call("respond_to_user", {"message": "작게 시작해 봐요."})
+
+    _, fb, meta = _onboarding(policy)
+    assert meta["retries"] == 1 and "제안 0" in seen[1]
+    assert fb["output"]["suggestions"][0]["text"] == "주 1회만 줄여 볼까요?" and fb["validation_final"]["ok"]
+
+
+def test_forced_counselor_cannot_hand_off_and_message_is_not_empty():
+    tools_seen = []
+
+    def policy(system, transcript, tools):
+        if not tools:
+            return _understand_reply()
+        role = _role(system)
+        if role == "counselor":
+            tools_seen.append({t["name"] for t in tools})
+            return Step(text="...")                                   # 아무것도 안 함 → 멈춤
+        return _call("handoff_to_strategist" if role == "analyst" else "handoff_to_analyst", {"reason": "핑퐁"})
+
+    _, fb, meta = _onboarding(policy)
+    assert not any(n.startswith("handoff_to_") for n in tools_seen[-1])
+    assert fb["output"]["message"] == FALLBACK_MESSAGE
+    assert meta["blocked_handoffs"]
+    assert len(meta["trace"]) == meta["hops"] - len(meta["blocked_handoffs"])          # 막힌 이동은 바통 기록에 없음
+
+
+def test_memory_keeps_newest_issues_and_drops_resolved():
+    from types import SimpleNamespace
+    agent = SwarmAgent(ScriptedLLM(lambda *a: Step()))
+    issues = [{"type": "t", "target": f"x{i}", "status": "그대로"} for i in range(25)]
+    issues.append({"type": "t", "target": "done", "status": "해결"})
+    agent._pre_run = lambda ctx: {}
+    agent._swarm = lambda ctx, board, meta: {"issues": issues, "goal": None, "suggestions": [], "message": ""}
+    agent.feedback(SimpleNamespace(fixed_answers=None, tools=SimpleNamespace(log=[])))
+    kept = [i["target"] for i in agent.memory["active_issues"]]
+    assert kept == [f"x{i}" for i in range(5, 25)] and "done" not in kept
+
+
+def test_string_evidence_is_not_split():
+    agent = SwarmAgent(ScriptedLLM(lambda *a: Step()))
+    b = Board()
+    agent._c_update_issue(_ctx(), b, {"type": "새 정기결제", "target": "웹툰패스", "status": "새로 생김", "evidence": "TABC123"})
+    assert next(iter(b.issues.values()))["evidence"] == ["TABC123"]
+
+
+def test_harness_tool_calls_counted_separately():
+    _, fb, meta = _onboarding(c08_policy())
+    assert meta["harness_tool_calls"] == 4
+    assert meta["tool_calls"] == sum(1 for t in fb["tools"][4:] if t["name"] != "check_gap_coverage")

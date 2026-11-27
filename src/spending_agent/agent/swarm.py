@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import re
 from collections.abc import Callable
 
 from ..baseline.harness import FeedbackCtx, UnderstandCtx
@@ -43,8 +42,9 @@ CONTROL: dict[str, list[str]] = {
     "analyst": ["update_issue"],
     "strategist": ["propose_action", "drop_action"],
     "reviewer": ["check_gap_coverage", "record_review", "update_issue"],
-    "counselor": ["respond_to_user"],
+    "counselor": ["respond_to_user", "edit_suggestion_text"],
 }
+NO_SAVING_ACTIONS = ("목표 조정",)      # 절감액이 아니라 필요액을 바꾸는 제안
 _STR, _INT = {"type": "string"}, {"type": "integer"}
 CONTROL_SPECS = {
     "update_issue": {
@@ -54,12 +54,19 @@ CONTROL_SPECS = {
             "evidence": {"type": "array", "items": _STR, "description": "근거 거래ID"}},
             "required": ["type", "target", "status"]}},
     "propose_action": {
-        "description": "제안 후보를 작업판에 올린다. saving_monthly 는 도구 결과(calculate 등)에 있는 월 절감액이어야 한다.",
+        "description": ("제안 후보를 작업판에 올린다. saving_monthly 는 이번에 calculate·forecast_goal 로 직접 계산한 월 절감액이어야 한다 "
+                        "(목표 조정은 생략). 강도: 줄이기 per_week, 저축 늘리기·상한 amount, 바꾸기 to, 목표 조정 deadline(+amount)."),
         "parameters": {"type": "object", "properties": {
-            "target": _STR, "action": _STR, "per_week": _INT, "amount": _INT, "saving_monthly": _INT,
+            "target": _STR, "action": _STR, "per_week": _INT, "amount": _INT,
+            "to": {"type": "string", "description": "바꾸기: 무엇으로 바꿀지"},
+            "deadline": {"type": "string", "description": "목표 조정: 새 마감일 YYYY-MM-DD"},
+            "saving_monthly": _INT,
             "basis": {"type": "string", "description": "절감액 근거 (계산식)"},
             "text": {"type": "string", "description": "유저에게 보일 문장"}},
-            "required": ["target", "action", "saving_monthly", "text"]}},
+            "required": ["target", "action", "text"]}},
+    "edit_suggestion_text": {
+        "description": "작업판 제안의 유저용 문장만 고친다 (절감액·강도는 못 바꾼다). 숫자 검증에 걸린 문장을 고칠 때.",
+        "parameters": {"type": "object", "properties": {"index": _INT, "text": _STR}, "required": ["index", "text"]}},
     "drop_action": {
         "description": "제안 후보를 뺀다 (0부터 시작하는 번호).",
         "parameters": {"type": "object", "properties": {"index": _INT}, "required": ["index"]}},
@@ -100,24 +107,49 @@ ROLE = {
 - 채워졌거나, 더 채울 현실적 후보가 없다는 사유가 있으면 record_review(ok=true) 후 handoff_to_counselor.""",
     "counselor": """너는 '유저 상담(counselor)'이다. 유저에게 말하는 유일한 창구다. 목표: 부담 없이 이해되게 전한다.
 - 작업판의 쟁점·제안·리뷰 결과를 바탕으로 respond_to_user 로 끝낸다. 새 전략을 만들지 말고 숫자를 지어내지 않는다.
-- 분석이 비었으면 handoff_to_analyst, 제안이 리뷰 전이면 handoff_to_reviewer.""",
+- 분석이 비었으면 handoff_to_analyst, 제안이 리뷰 전이면 handoff_to_reviewer. (강제 마무리 중이면 넘기지 말고 바로 respond_to_user)
+- 제안 문장에 문제가 있으면 edit_suggestion_text 로 문장만 고친다.""",
 }
 
 RULES = """[지금] {today} ({wd}) {kind}. 다음 피드백: {nxt}
 질문 한도: 이번 일에서 최대 {max_q}개 (ask_user). 제안은 최대 3개.
 쟁점 유형: {issue_types}
 쟁점 상태: {statuses}
-제안 행동: {actions}. 줄이기는 per_week, 저축 늘리기는 amount 를 적는다."""
+제안 행동: {actions}.
+제안 강도는 행동에 맞는 칸만: 줄이기 per_week / 저축 늘리기·상한 정하기 amount / 바꾸기 to / 목표 조정 deadline(+amount)."""
+
+FALLBACK_MESSAGE = "이번 피드백은 쟁점만 정리했어요. 제안은 다음에 다시 살펴볼게요."
 
 
-def _numbers(obj) -> set[int]:
-    """도구 결과에 나온 정수 (1,234 같은 표기 포함)."""
-    text = json.dumps(obj, ensure_ascii=False, default=str)
-    out = set()
-    for x in re.findall(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?", text):
-        v = float(x.replace(",", ""))
-        if v.is_integer():                     # 0.75 의 75 처럼 소수 조각은 허용하지 않는다
-            out.add(int(v))
+def _list(x) -> list[str]:
+    """문자열 하나가 오면 한 글자씩 쪼개지지 않게 목록으로 감싼다."""
+    if x is None:
+        return []
+    if isinstance(x, str):
+        return [x] if x.strip() else []
+    if isinstance(x, (list, tuple)):
+        return [str(i) for i in x if str(i).strip()]
+    return [str(x)]
+
+
+def _true(x) -> bool:
+    """LLM 이 boolean 대신 문자열을 보내도 'true' 만 참으로 본다 (bool('false') 는 True 라서)."""
+    return x is True or (isinstance(x, str) and x.strip().lower() == "true")
+
+
+def calculated_numbers(log: list[dict]) -> set[int]:
+    """에이전트가 이번 일에서 직접 계산한 값만 (calculate 결과, forecast_goal 의 필요액·남은 금액).
+    조회 도구의 날짜·거래ID·개별 금액이나 검산 기록의 남은 부족분은 넣지 않는다."""
+    out: set[int] = set()
+    for t in log:
+        o = t.get("output") or {}
+        if not isinstance(o, dict) or o.get("status") != "ok":
+            continue
+        v = o.get("value") or {}
+        if t.get("name") == "calculate" and isinstance(v.get("result"), int):
+            out.add(abs(v["result"]))
+        elif t.get("name") == "forecast_goal":
+            out |= {abs(int(v[k])) for k in ("monthly_required", "gap") if isinstance(v.get(k), int)}
     return out
 
 
@@ -151,17 +183,22 @@ class SwarmAgent:
     def feedback(self, ctx: FeedbackCtx) -> dict:
         if ctx.fixed_answers:
             self.memory["fixed_answers"] = ctx.fixed_answers
-        meta = {"llm_calls": 0, "tool_calls": 0, "input_tokens": 0, "output_tokens": 0, "llm_seconds": 0.0,
-                "retries": 0, "parse_errors": 0, "hops": 0, "bounces": 0, "by_agent": {}}
+        meta = {"llm_calls": 0, "tool_calls": 0, "harness_tool_calls": 0, "input_tokens": 0, "output_tokens": 0,
+                "llm_seconds": 0.0, "retries": 0, "parse_errors": 0, "hops": 0, "bounces": 0, "by_agent": {},
+                "blocked_handoffs": []}
         board = Board()
         n0 = len(ctx.tools.log)
         board.precomputed = self._pre_run(ctx)
+        n1 = len(ctx.tools.log)
         board.issues = {f'{i.get("type")}|{i.get("target")}': dict(i) for i in self.memory["active_issues"]}
         out = self._swarm(ctx, board, meta)
-        meta["tool_calls"] = len(ctx.tools.log) - n0          # 전처리 포함 실제 도구 호출 수
+        # 비교 공정성: 에이전트가 부른 도구와 하네스 전처리를 따로 센다 (싱글은 전처리가 없다)
+        meta["harness_tool_calls"] = n1 - n0
+        meta["tool_calls"] = sum(1 for t in ctx.tools.log[n1:] if t.get("name") != "check_gap_coverage")
         meta["trace"] = board.trace
         meta["forced"] = board.forced
-        self.memory["active_issues"] = out.get("issues", [])[:20]
+        # 해결된 쟁점은 이번에 알린 뒤 빼고, 최근 것을 남긴다 (오래된 것부터 자른다)
+        self.memory["active_issues"] = [i for i in out.get("issues", []) if i.get("status") != "해결"][-20:]
         self.memory["last_goal"] = out.get("goal")
         return {**out, "_meta": meta}
 
@@ -189,7 +226,7 @@ class SwarmAgent:
             meta["parse_errors"] += 1
             transcript.append({"role": "user", "text": "JSON 형식이 아니다. 정해진 JSON 하나만 다시 답하라."})
         out = out or {}
-        self._apply_understanding(out)
+        self._apply_understanding(out, ev.get("record", {}).get("record_id") or ev.get("feedback_date"))
         return {**out, "_meta": meta}
 
     # ================================================================ 하네스: 규칙 전처리
@@ -203,7 +240,9 @@ class SwarmAgent:
         new = [{"merchant": x["merchant"], "first_seen": x["first_seen"], "amount": x["charges"][-1]["amount"],
                 "tx": x["charges"][-1]["tx"]}
                for x in rec.get("new_since_onboarding", []) + [r for r in recurring if r.get("started_after_onboarding")]]
-        changes = [{"merchant": x["merchant"], **c} for x in recurring for c in x.get("price_changes", [])]
+        new.sort(key=lambda x: x["first_seen"], reverse=True)               # 최근 것부터 (자를 때 최근 변화가 남게)
+        changes = sorted(({"merchant": x["merchant"], **c} for x in recurring for c in x.get("price_changes", [])),
+                         key=lambda c: c["month"], reverse=True)
         groups = []
         for g in unnamed.get("groups", [])[:8]:
             months = {d[:7] for d in g["dates"]}
@@ -234,9 +273,13 @@ class SwarmAgent:
                 if not v.get("ok") and retries < self.max_retries:
                     retries += 1
                     meta["retries"] += 1
+                    bad = v.get("bad", [])
+                    where = [f"제안 {i}" for i, s in enumerate(val.get("suggestions", []))
+                             if any(b in str(s.get("text", "")).replace(",", "") for b in bad)]
                     active, note = "counselor", HandoffNote(
-                        from_agent="harness", to_agent="counselor", focus=[],
-                        reason=f"메시지·제안 문장에 도구 결과에 없는 숫자가 있다: {', '.join(v.get('bad', []))}. 빼거나 도구 결과로 바꿔 다시 respond_to_user.")
+                        from_agent="harness", to_agent="counselor", focus=where,
+                        reason=(f"도구 결과에 없는 숫자가 있다: {', '.join(bad)}. 메시지면 빼거나 도구 결과로 바꾸고, "
+                                f"제안 문장이면 edit_suggestion_text 로 고친 뒤 다시 respond_to_user."))
                     continue
                 return val
             if kind == "stall":
@@ -253,17 +296,19 @@ class SwarmAgent:
             if active == "reviewer" and to == "strategist":
                 bounces += 1
                 meta["bounces"] = bounces
-            board.trace.append(HandoffNote(from_agent=active, to_agent=to, reason=str(args.get("reason", ""))[:200],
-                                           focus=[str(x) for x in (args.get("focus") or [])][:5]))
+            move = HandoffNote(from_agent=active, to_agent=to, reason=str(args.get("reason", ""))[:200],
+                               focus=_list(args.get("focus"))[:5])
             limit = (f"바통 {hops}번으로 한도({MAX_HOPS}) 도달" if hops >= MAX_HOPS and to != "counselor" else
                      f"반려 {bounces}번으로 한도({MAX_BOUNCE}) 초과" if bounces > MAX_BOUNCE else None)
-            if limit:
+            if limit:                                # 막힌 이동은 바통 기록(협업 로그)에 넣지 않는다
+                meta["blocked_handoffs"].append({**move, "why": limit})
                 if board.forced:                     # 이미 강제 마무리 중인데 또 넘김 → 지금 작업판으로 끝낸다
                     return self._fallback(board)
                 board.forced = limit
                 active, note = "counselor", self._force_note(active, limit)
                 continue
-            active, note = to, board.trace[-1]
+            board.trace.append(move)
+            active, note = to, move
 
     def _force_note(self, frm: str, why: str) -> HandoffNote:
         return HandoffNote(from_agent="harness", to_agent="counselor", focus=[],
@@ -271,19 +316,21 @@ class SwarmAgent:
 
     def _fallback(self, board: Board) -> dict:
         return {"issues": list(board.issues.values()), "goal": {"on_track": None, "summary": ""},
-                "suggestions": self._approved(board), "message": ""}
+                "suggestions": self._approved(board), "message": FALLBACK_MESSAGE}
 
     @staticmethod
     def _approved(board: Board) -> list[dict]:
         if not board.review.get("ok"):
             return []
-        keys = ("target", "action", "per_week", "amount", "text")
+        keys = ("target", "action", "per_week", "amount", "to", "deadline", "text")
         return [{k: p[k] for k in keys if p.get(k) is not None} for p in board.proposals][:3]
 
     # ================================================================ 한 에이전트의 한 번 차례
     def _hop(self, role: str, ctx: FeedbackCtx, board: Board, note: HandoffNote | None, meta: dict):
         specs = [s for s in ctx.tools.specs() if s["name"] in DOMAIN[role]]
         names = CONTROL[role] + [f"handoff_to_{b}" for b in AGENTS if b != role]
+        if board.forced and role == "counselor":    # 강제 마무리 중에는 넘길 수 없다 (빈 메시지로 끝나지 않게)
+            names = list(CONTROL["counselor"])
         specs += [{"name": n, **CONTROL_SPECS[n]} for n in names]
         day = dt.date.fromisoformat(ctx.today)
         system = (f"{COMMON}\n\n{ROLE[role]}\n\n" + RULES.format(
@@ -330,26 +377,33 @@ class SwarmAgent:
 
     # ================================================================ 제어 도구 (결정적)
     def _known(self, ctx: FeedbackCtx) -> set[int]:
-        return _numbers(ctx.tools.results())
+        return calculated_numbers(ctx.tools.log)
 
     def _c_update_issue(self, ctx, board: Board, a: dict) -> dict:
         if a.get("status") not in STATUSES:
             return {"ok": False, "error": f"status 는 {', '.join(STATUSES)} 중 하나"}
         key = f'{a.get("type")}|{a.get("target")}'
         board.issues[key] = {"type": a.get("type"), "target": a.get("target"), "status": a["status"],
-                             "evidence": [str(x) for x in (a.get("evidence") or [])][:10],
-                             "summary": str(a.get("summary", ""))[:200]}
+                             "evidence": _list(a.get("evidence"))[:10], "summary": str(a.get("summary", ""))[:200]}
         return {"ok": True, "issues": len(board.issues)}
 
     def _c_propose_action(self, ctx, board: Board, a: dict) -> dict:
-        if a.get("action") not in ACTIONS:
+        act = a.get("action")
+        if act not in ACTIONS:
             return {"ok": False, "error": f"action 은 {', '.join(ACTIONS)} 중 하나"}
         saving = a.get("saving_monthly")
-        if not isinstance(saving, int) or saving <= 0 or saving not in self._known(ctx):
-            return {"ok": False, "error": "saving_monthly 는 이번 도구 결과(calculate 등)에 있는 양수여야 한다. 먼저 계산하라."}
+        if act in NO_SAVING_ACTIONS:
+            if not (a.get("deadline") or a.get("amount")):
+                return {"ok": False, "error": "목표 조정은 deadline(새 마감일) 이나 amount(새 목표 금액)를 적어야 한다."}
+            saving = None
+        elif not isinstance(saving, int) or saving <= 0 or saving not in self._known(ctx):
+            return {"ok": False, "error": "saving_monthly 는 이번에 calculate·forecast_goal 로 직접 계산한 양수여야 한다. 먼저 계산하라."}
+        if act == "바꾸기" and not a.get("to"):
+            return {"ok": False, "error": "바꾸기는 to(무엇으로 바꿀지)를 적어야 한다."}
         if len(board.proposals) >= 3:
             return {"ok": False, "error": "제안은 최대 3개. drop_action 으로 하나 빼고 올려라."}
-        keys = ("target", "action", "per_week", "amount", "saving_monthly", "basis", "text")
+        a = {**a, "saving_monthly": saving}
+        keys = ("target", "action", "per_week", "amount", "to", "deadline", "saving_monthly", "basis", "text")
         board.proposals.append({k: a[k] for k in keys if a.get(k) is not None})
         board.review, board.gap = {}, {}             # 조합이 바뀌면 검산·검증을 다시 받는다
         return {"ok": True, "proposals": len(board.proposals)}
@@ -366,23 +420,33 @@ class SwarmAgent:
         short = a.get("monthly_shortfall")
         if not isinstance(short, int) or short < 0 or short not in self._known(ctx):
             return {"ok": False, "error": "monthly_shortfall 은 이번 도구 결과에 있는 숫자여야 한다 (calculate 로 구하라)."}
-        total = sum(int(p.get("saving_monthly", 0)) for p in board.proposals)
+        savers = [p for p in board.proposals if p.get("saving_monthly")]
+        total = sum(int(p["saving_monthly"]) for p in savers)
         remaining = max(0, short - total)
         board.gap = {"monthly_shortfall": short, "proposed_saving_sum": total, "remaining_gap": remaining,
                      "covered": remaining == 0,
-                     "calc": f"{short:,} − ({' + '.join(f'{int(p.get('saving_monthly', 0)):,}' for p in board.proposals) or '0'})"
+                     "calc": f"{short:,} − ({' + '.join(f'{int(p['saving_monthly']):,}' for p in savers) or '0'})"
                              f" = 남은 부족분 {remaining:,}"}
+        if any(p.get("action") in NO_SAVING_ACTIONS for p in board.proposals):
+            board.gap["note"] = "목표 조정 제안이 있다: 필요액 자체가 바뀌므로 남은 부족분만으로 반려하지 않는다"
         ctx.tools.log.append({"name": "check_gap_coverage", "args": a,
                               "output": {"status": "ok", "value": board.gap, "calc": {"gap": board.gap["calc"]},
                                          "sources": [], "as_of": ctx.today, "caveats": []}})
         return {"ok": True, **board.gap}
 
     def _c_record_review(self, ctx, board: Board, a: dict) -> dict:
-        ok = bool(a.get("ok"))
+        ok = _true(a.get("ok"))
         if ok and board.proposals and not board.gap:
             return {"ok": False, "error": "check_gap_coverage 로 검산한 뒤에 통과시켜라."}
         board.review = {"ok": ok, "reason": str(a.get("reason", ""))[:300]}
         return {"ok": True, "review": board.review}
+
+    def _c_edit_suggestion_text(self, ctx, board: Board, a: dict) -> dict:
+        i, text = a.get("index"), a.get("text")
+        if not isinstance(i, int) or not 0 <= i < len(board.proposals) or not isinstance(text, str) or not text.strip():
+            return {"ok": False, "error": "없는 번호이거나 빈 문장"}
+        board.proposals[i]["text"] = text.strip()[:300]      # 문장만 바뀌고 절감액·강도는 그대로라 리뷰는 유지된다
+        return {"ok": True}
 
     def _respond(self, board: Board, a: dict) -> dict:
         if board.proposals and not board.review.get("ok") and not board.forced:
@@ -400,11 +464,11 @@ class SwarmAgent:
                 "제안과 유저 반응": m["recent_decisions"], "질문과 답": m["qa"]}
         return json.dumps(view, ensure_ascii=False, default=str)
 
-    def _apply_understanding(self, out: dict) -> None:
+    def _apply_understanding(self, out: dict, ref: str | None = None) -> None:
         for u in out.get("profile_updates", []) or []:
             if isinstance(u, dict) and u.get("field"):
                 self.memory["profile"][str(u["field"])] = {"value": u.get("value"), "kind": u.get("kind"),
-                                                          "evidence": u.get("evidence")}
+                                                          "evidence": u.get("evidence") or ref}   # 근거가 없으면 기록ID
         if isinstance(out.get("patterns"), list):
             self.memory["patterns"] = [str(x) for x in out["patterns"]][:10]
         if isinstance(out.get("questions_for_next"), list):
