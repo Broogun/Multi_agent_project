@@ -12,10 +12,11 @@ from spending_agent.baseline import __main__ as cli
 from spending_agent.baseline.harness import run, user_numbers, verify_feedback
 from spending_agent.baseline.llm import OpenAIResponses, ScriptedLLM, Step, ToolCall, tool_outputs
 from spending_agent.baseline.score import _truth_items, match_issues, score
-from spending_agent.baseline.simulator import UNKNOWN, Simulator
+from spending_agent.baseline.simulator import STRENGTH_FORMATS, UNKNOWN, Simulator, strengths
 from spending_agent.baseline.single import SingleAgent
 from spending_agent.baseline.tools import ToolBox, View, card_bills, recurring_payments, spending_summary
 from spending_agent.demo.generator import build_world, load_persona
+from spending_agent.demo.responses import STRENGTHS
 
 D = dt.date
 
@@ -81,6 +82,28 @@ def test_simulator_answers_only_targeted_questions(p1, target, question, fact):
     a = Simulator(p, w.truth["user_sim"]).answer(target, question)
     facts = {h["id"]: h["answer"] for h in w.truth["user_sim"]["hidden_facts"]}
     assert a["fact"] == fact and a["answer"] == (facts[fact] if fact else UNKNOWN)
+
+
+def test_strengths_keep_only_well_formed_values():
+    assert set(STRENGTH_FORMATS) == set(STRENGTHS)            # 반응 규칙이 보는 강도는 모두 넘긴다
+    assert strengths({"per_week": 1, "amount": 30000.0, "deadline": "2027-03-15", "to": " 테이크아웃 ", "x": 1}) == \
+        {"per_week": 1, "amount": 30000.0, "deadline": "2027-03-15", "to": "테이크아웃"}
+    assert strengths({"per_week": True, "amount": "3만", "deadline": "내년 3월", "to": " "}) == {}
+
+
+def test_simulator_react_uses_to_deadline_and_day():
+    p2, p5 = load_persona("P2"), load_persona("P5")
+    s2, s5 = (Simulator(p, build_world(p).truth["user_sim"]) for p in (p2, p5))
+    takeout = {"target": "카페", "action": "바꾸기", "to": "학교 앞 저가 테이크아웃"}
+    assert s2.react(takeout)["decision"] == "수락" and s2.react(takeout)["to"] == takeout["to"]
+    assert s2.react({"target": "카페", "action": "바꾸기"})["decision"] != "수락"           # 무엇으로 바꿀지 없음
+    fewer = {"target": "카페", "action": "줄이기", "per_week": 1}
+    exam = s2.react(fewer, D(2026, 12, 13))                                                # 기말고사 기간 (H2)
+    assert exam["decision"] == "거절" and exam["protected"]
+    assert s2.react(fewer, D(2026, 12, 20))["decision"] == "수락"
+    goal = {"target": "비상금 목표", "action": "목표 조정", "deadline": "2027-12-31", "amount": 3000000}
+    assert s5.react(goal, D(2026, 12, 6))["decision"] == "수락"
+    assert s5.react(goal | {"deadline": "내년 말"}, D(2026, 12, 6))["decision"] != "수락"
 
 
 def test_question_limit(p1):
@@ -161,7 +184,34 @@ def test_accepted_suggestion_changes_only_later_days():
 
     rec, _ = _run(policy)            # 지난 데이터가 바뀌면 harness._same_past 가 실패시킨다
     assert rec["rebuilds"] == 1 and rec["accepted"] == [{"response": "delivery", "day": "2026-12-01", "per_week": 1}]
-    assert score(rec)["saving"]["feedback_effect"] > 0
+    saving = score(rec)["saving"]
+    assert saving["expected_feedback_effect"] > 0 and saving["feedback_effect"] > 0
+
+
+def test_p2_run_passes_strengths_day_and_scores_served_world():
+    """바꾸기(to)는 수락, 시험기간 카페 줄이기는 그날 기준으로 거절, 게임 상한은 12월 말 초과 결제를 막는다."""
+    plan = {"2026-12-01": [{"target": "카페", "action": "바꾸기", "to": "학교 앞 저가 테이크아웃", "text": "테이크아웃으로"}],
+            "2026-12-13": [{"target": "카페", "action": "줄이기", "per_week": 1, "text": "카페를 한 번 줄여요"},
+                           {"target": "게임", "action": "상한 정하기", "amount": 30000, "text": "게임 상한을 지켜요"}]}
+
+    def policy(system, transcript, tools):
+        if not tools:
+            return _understand_reply()
+        today = transcript[0]["text"].split()[1]                 # "[오늘] YYYY-MM-DD ..."
+        return Step(text=json.dumps({"issues": [], "suggestions": plan.get(today, []), "message": "확인했어요."},
+                                    ensure_ascii=False))
+
+    rec = dataclasses.asdict(run("P2", SingleAgent(ScriptedLLM(policy))))
+    by_date = {fb["date"]: fb for fb in rec["feedbacks"]}
+    assert [r["decision"] for r in by_date["2026-12-13"]["reactions"]] == ["거절", "수락"]
+    assert [(a["day"], a.get("to"), a.get("amount")) for a in rec["accepted"]] == \
+        [("2026-12-01", "학교 앞 저가 테이크아웃", None), ("2026-12-13", None, 30000)]
+    s = score(rec)
+    assert s["suggestions"]["protected_violations"] == 1
+    assert s["issues"]["prevented"] == ["game_over_cap"]
+    end = next(pt for pt in s["issues"]["by_point"] if pt["date"] == "2026-12-31")
+    assert end["prevented"] == ["game_over_cap"] and "game_over_cap" not in end["required"]
+    assert s["saving"]["expected_feedback_effect"] > 0
 
 
 def test_verify_feedback_allows_user_numbers_and_own_strength():
@@ -169,6 +219,11 @@ def test_verify_feedback_allows_user_numbers_and_own_strength():
            "suggestions": [{"target": "적금", "action": "저축 늘리기", "amount": 30000, "text": ""}]}
     assert verify_feedback(out, [user_numbers(["목표 2,000,000원"])])["ok"]
     assert not verify_feedback(out | {"message": "매달 45,000원"}, [user_numbers([])])["ok"]
+    goal = {"message": "", "suggestions": [{"target": "목표", "action": "목표 조정", "deadline": "2027-03-15",
+                                            "text": "마감을 2027년 3월 15일로 미뤄 볼까요?"}]}
+    assert verify_feedback(goal, [user_numbers([])])["ok"]                       # 에이전트가 고른 새 마감일
+    assert not verify_feedback(goal | {"suggestions": [dict(goal["suggestions"][0], deadline="내년")]},
+                               [user_numbers([])])["ok"]
 
 
 # ------------------------------------------------------------------ 채점
@@ -188,7 +243,7 @@ def test_good_agent_scores_higher_than_bad():
     assert good["numbers"]["final_ok"] == good["numbers"]["feedbacks"] and bad["numbers"]["final_ok"] == 0
     assert good["suggestions"]["protected_violations"] == 0 < bad["suggestions"]["protected_violations"]
     assert good["questions"]["facts"] == ["H2"]
-    assert good["saving"]["feedback_effect"] > bad["saving"]["feedback_effect"] == 0
+    assert good["saving"]["expected_feedback_effect"] > bad["saving"]["expected_feedback_effect"] == 0
 
 
 def test_cli_dry_run_and_rescore(tmp_path, monkeypatch, capsys):

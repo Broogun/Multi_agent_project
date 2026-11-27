@@ -22,7 +22,7 @@ from ..agent.tools import verify_response
 from ..contracts import ToolResult, Validation
 from ..demo import responses
 from ..demo.generator import FEEDBACK_HOUR, World, build_world, load_persona
-from .simulator import Simulator
+from .simulator import Simulator, strengths
 from .tools import ToolBox, View
 
 DAY = dt.timedelta(days=1)
@@ -79,11 +79,10 @@ def user_numbers(texts: list[str]) -> ToolResult:
 
 def verify_feedback(out: dict, results: list[ToolResult]) -> Validation:
     texts = [str(out.get("message", ""))] + [str(s.get("text", "")) for s in out.get("suggestions", [])]
-    own = []          # 에이전트가 고른 제안 강도(주 n회·금액)는 사실이 아니라 선택이라 허용한다
+    own = []          # 에이전트가 고른 제안 강도(주 n회·금액·새 마감일)는 사실이 아니라 선택이라 허용한다
     for s in out.get("suggestions", []):
-        for k in ("per_week", "amount"):
-            if isinstance(s.get(k), (int, float)):
-                own.append(f"{s[k]:g}")
+        st = strengths(s) if isinstance(s, dict) else {}
+        own += [f"{st[k]:g}" for k in ("per_week", "amount") if k in st] + ([st["deadline"]] if "deadline" in st else [])
     return verify_response("\n".join(texts), results + [user_numbers(own)])
 
 
@@ -113,7 +112,8 @@ def _same_past(old: World, new: World, delivered: set[str], through: dt.date) ->
             raise RuntimeError(f"서비스 있음 세계를 다시 만들었더니 이미 쓴 {d} 기록이 바뀌었다")
 
 
-def _world(p: dict, scale: float, accepted: list[dict]) -> World:
+def served_world(p: dict, scale: float, accepted: list[dict]) -> World:
+    """에이전트가 실제로 본 세계: 수락이 없으면 ② 앱만, 있으면 ③ 앱 + 피드백. 채점(score.py)도 이 세계로 한다."""
     return build_world(responses.with_self(p, scale, [dict(a, day=dt.date.fromisoformat(a["day"])) for a in accepted])[0])
 
 
@@ -121,7 +121,7 @@ def run(pid: str, agent: Agent, until: dt.date | None = None,
         self_scale: float = responses.SELF_SCALES["중간"]) -> Run:
     p = load_persona(pid)
     sim = Simulator(p, build_world(p).truth["user_sim"])
-    w = _world(p, self_scale, [])                   # ② 앱만
+    w = served_world(p, self_scale, [])             # ② 앱만
     kinds = {pt["date"]: pt["kind"] for pt in w.feedback}
     dates = sorted(kinds)
     last = min(until or w.end - DAY, w.end - DAY)
@@ -162,8 +162,8 @@ def run(pid: str, agent: Agent, until: dt.date | None = None,
         out, notes = _normalize(out)
         told.extend(q["answer"] for q in box.questions)
         final = check(out)
-        reactions = [{"suggestion": s, **sim.react(s)} for s in out["suggestions"]]
-        new = [{"response": r["response"], "day": today, **{k: r[k] for k in ("per_week", "amount") if k in r}}
+        reactions = [{"suggestion": s, **sim.react(s, day)} for s in out["suggestions"]]
+        new = [{"response": r["response"], "day": today, **{k: r[k] for k in responses.STRENGTHS if k in r}}
                for r in reactions if r["decision"] == "수락"]
         rec.feedbacks.append({"date": today, "kind": kind, "output": out, "notes": notes, "tools": box.log,
                               "questions": box.questions, "validation_first": checks[0], "validation_final": final,
@@ -171,7 +171,7 @@ def run(pid: str, agent: Agent, until: dt.date | None = None,
         rec.calls[-1]["output"] = out
         if new:                                     # ③ 앱 + 피드백으로 다시 만든다
             rec.accepted += new
-            w2 = _world(p, self_scale, rec.accepted)
+            w2 = served_world(p, self_scale, rec.accepted)
             _same_past(w, w2, delivered, day)
             w, rec.rebuilds = w2, rec.rebuilds + 1
         event = {"kind": "replies", "feedback_date": today,

@@ -28,12 +28,14 @@ def summary(s: dict) -> str:
     i, n, q, g, c = s["issues"], s["numbers"], s["questions"], s["suggestions"], s["cost"]
     lines = [
         (f"쟁점: 필수 {i['required']}개 중 {i['hit']}개 짚음 (재현율 {i['recall']}), 끝난 쟁점 해결 갱신 "
-         f"{i['closed_updated']}/{i['closed_to_update']}, 정답과 안 맞은 쟁점 {i['unmatched_agent_issues']}개"),
+         f"{i['closed_updated']}/{i['closed_to_update']}, 정답과 안 맞은 쟁점 {i['unmatched_agent_issues']}개"
+         + (f", 제안으로 막은 쟁점 {', '.join(i['prevented'])}" if i.get("prevented") else "")),
         f"숫자 검증: 피드백 {n['feedbacks']}번 중 첫 답 통과 {n['first_ok']}, 최종 통과 {n['final_ok']}",
         f"질문: {q['asked']}개, 숨은 사실을 맞힌 질문 {q['hit_fact']}개 (밝혀진 사실 {len(q['facts'])}/{q['facts_total']})",
         f"제안: {g['total']}개 (수락 {g['수락']} · 거절 {g['거절']} · 보류 {g['보류']}), 보호 지출 위반 {g['protected_violations']}",
-        (f"절약 (자기 기록 효과 배율 {s['saving']['scale']}): 피드백 효과 {s['saving']['feedback_effect']:,}원 "
-         f"(서비스 전체 {s['saving']['total']:,}원) — {s['saving']['calc']}") if s["saving"]
+        (f"절약 (자기 기록 효과 배율 {s['saving']['scale']}): 피드백 효과 기댓값 "
+         f"{s['saving']['expected_feedback_effect']:,}원 (실제 거래 {s['saving']['feedback_effect']:,}원, "
+         f"서비스 전체 {s['saving']['total']:,}원) — {s['saving']['calc']}") if s["saving"]
         else "절약: 반응 규칙 없음 (페르소나 파일에 [[responses]] 추가 필요)",
         (f"비용: LLM {c['llm_calls']}회 · 도구 {c['tool_calls']}회 · 입력 {c['input_tokens']:,} · 출력 {c['output_tokens']:,} 토큰"
          f" · 호출당 입력 최대 {c['max_input_per_call']:,} · {c['seconds']}초"),

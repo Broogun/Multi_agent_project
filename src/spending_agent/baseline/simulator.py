@@ -5,10 +5,11 @@
   안 맞거나 여러 개가 비슷하면 "잘 모르겠어요".
   숨은 사실의 키워드 = 주제(topic)의 날짜·금액·낱말 + 그 사실을 쓰는 반응 규칙의 가맹점 이름·대상 낱말.
   페르소나 파일의 hidden_facts 에 targets = [...] 가 있으면 강한 키워드로 더한다.
-- 제안: demo.responses.react (반응 규칙)로 수락·거절·보류. 거절 이유는 에이전트에게 넘기지 않는다 (숨은 사실이 새지 않게).
+- 제안: demo.responses.react (반응 규칙)로 수락·거절·보류. 강도 4가지(responses.STRENGTHS)와 제안한 날을 넘긴다. 거절 이유는 에이전트에게 넘기지 않는다 (숨은 사실이 새지 않게).
 """
 from __future__ import annotations
 
+import datetime as dt
 import re
 
 from ..demo import responses
@@ -82,9 +83,33 @@ class Simulator:
         facts = {h["id"]: h for h in self.sim.get("hidden_facts", [])}
         return {"answer": facts[fid]["answer"] if fid else UNKNOWN, "fact": fid, "score": score}
 
-    def react(self, suggestion: dict) -> dict:
-        s = {"target": str(suggestion.get("target", "")), "action": str(suggestion.get("action", ""))}
-        for k in ("per_week", "amount"):
-            if isinstance(suggestion.get(k), (int, float)):
-                s[k] = suggestion[k]
-        return responses.react(self.p, s)
+    def react(self, suggestion: dict, day: dt.date | None = None) -> dict:
+        """day = 제안한 날. 기간이 붙은 거절(예: P2 시험기간 카페 줄이기)은 이 날짜로 본다."""
+        s = {"target": str(suggestion.get("target", "")), "action": str(suggestion.get("action", "")),
+             **strengths(suggestion)}
+        return responses.react(self.p, s, day)
+
+
+def _number(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _text(v):
+    return v.strip() if isinstance(v, str) and v.strip() else None
+
+
+def _iso_date(v):
+    try:
+        return dt.date.fromisoformat(v.strip()).isoformat() if isinstance(v, str) else None
+    except ValueError:
+        return None
+
+
+# 제안 강도 (responses.STRENGTHS) 마다 형식 검사. 형식이 틀린 값은 없는 것으로 본다 (그러면 대개 수락되지 않는다).
+STRENGTH_FORMATS = {"per_week": _number, "amount": _number, "deadline": _iso_date, "to": _text}
+
+
+def strengths(suggestion: dict) -> dict:
+    """제안에서 강도만 골라 낸다: per_week·amount 는 숫자, deadline 은 YYYY-MM-DD, to 는 글자."""
+    out = {k: STRENGTH_FORMATS[k](suggestion.get(k)) for k in responses.STRENGTHS}
+    return {k: v for k, v in out.items() if v is not None}
