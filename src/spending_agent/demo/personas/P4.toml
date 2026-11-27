@@ -380,6 +380,12 @@ topic = "1월에도 11일 적금 출금이 없음"
 fact = "알바비가 늘었지만 12월에 엄마한테 받은 게 마음에 걸려 통장에 남겨 두고 있다. 2월 월세까지 버틸 수 있을지 걱정된다."
 answer = "엄마한테 받은 것도 있고 해서 일단 통장에 두고 있어요. 2월 월세가 걱정돼서요."
 
+[[hidden_facts]]
+id = "H13"
+topic = "알바 끝난 날 배달·편의점"
+fact = "알바 끝난 날은 너무 피곤해서 배달이나 편의점으로 때운다. 알바 없는 날엔 라면이나 계란밥 같은 간단한 건 해 먹을 수 있다."
+answer = "알바 끝나면 너무 피곤해서요... 알바 없는 날엔 간단한 건 해 먹을 수 있어요."
+
 # ---------------------------------------------------------------- 얽힌 문제 (한 가지 방법으로는 안 풀린다)
 # side: 수입 / 지출 / 목표. lever: truth.facts.levers 에서 크기를 계산하는 방법 (없으면 사용자 확인 가격 전엔 모름)
 # constraints: 그 방법을 쓸 때 부딪히는 제약 (숨은 사실 id 또는 설명). leads_to: 이어지는 작업
@@ -550,6 +556,106 @@ prob = 0.12
 delay_days = [1, 1]
 hours = [9, 22]
 texts = ["편의점 {amount}원", "편의점에서 간식"]
+
+# ---------------------------------------------------------------- 반응 규칙 (서비스 있음 세계, docs/10 §4, 초안)
+# 피드백의 제안(대상·행동·강도)에 반응한다. 기준 세계에는 쓰이지 않는다. 형식: spending_agent.demo.responses, 예시는 P1.toml
+# 규칙에 없는 대상·행동은 '보류'로 아무것도 바뀌지 않는다.
+# 수락: 회식비 미리 걷기(H9), 배달 2주에 한 번·편의점 주 1회 줄이기(H13), 목표 시점 3월 중순까지 미루기(H8),
+# 알바비가 회복된 뒤 노트북 적금 5만 원(H12). 거절: 동아리 줄이기(보호), 직접 정산 독촉(H9), 요리로 바꾸기(H13),
+# 대용량 구매(H6), 알바 늘리기(H2·H11), 부모님께 더 받기(H10).
+[[responses]]
+id = "club"
+target = { merchants = ["dinner_a", "dinner_b", "dinner_c"], words = ["회식", "정산", "동아리", "총무"] }
+facts = ["H1", "H9"]
+accept = [{ action = "바꾸기", to = ["미리", "먼저 걷", "선결제", "사전"] }]
+reject = [
+  { action = "줄이기", protected = true, why = "보호 지출: 동아리 활동은 줄이지 않는다" },
+  { action = "끊기", protected = true, why = "보호 지출: 동아리 활동은 줄이지 않는다" },
+  { action = "정산 받기", why = "H9: 부원에게 직접 달라고 하기는 불편하다" },
+]
+effect = { club = "prepaid" }   # 회식 전에 미리 걷으면 못 받는 정산이 없어진다
+
+[[responses]]
+id = "delivery"
+target = { merchants = ["delivery"], words = ["배달"] }
+facts = ["H13"]
+accept = [{ action = "줄이기", max_per_week = 0.5 }]
+reject = [
+  { action = "줄이기", why = "H13: 알바 없는 날만 해 먹을 수 있다" },
+  { action = "끊기", why = "H13: 알바 끝난 날은 너무 피곤하다" },
+  { action = "바꾸기", to = ["요리", "집밥", "식재료", "장보기"], why = "H13: 피곤한 날 요리는 못 한다" },
+]
+effect = [{ habit = "delivery" }, { habit = "mart", factor = 1.2 }]   # 해 먹는 날만큼 마트 장보기가 조금 는다 (가정)
+hold_days = 21
+keep_after = 0.5
+
+[[responses]]
+id = "convenience"
+target = { merchants = ["conv_a", "conv_b"], words = ["편의점"] }
+facts = ["H13"]
+accept = [{ action = "줄이기", max_per_week = 1 }]
+reject = [
+  { action = "줄이기", why = "H13: 알바 끝난 날은 편의점으로 때워야 한다" },
+  { action = "끊기", why = "H13: 알바 끝난 날은 너무 피곤하다" },
+]
+effect = { habit = "conv" }
+hold_days = 21
+keep_after = 0.5
+
+[[responses]]
+id = "mart_bulk"
+target = { merchants = ["mart"], words = ["생필품", "대용량"] }
+facts = ["H6"]
+reject = [{ action = "바꾸기", to = ["대용량", "묶음", "박스", "한꺼번에"], why = "H6: 방이 좁아 큰 묶음은 둘 곳이 없다" }]
+
+[[responses]]
+id = "goal_flex"
+target = { words = ["노트북", "목표"] }
+facts = ["H8"]
+accept = [{ action = "목표 조정", max_deadline = 2027-03-15 }]   # 금액은 낮춰도 된다 (상태 좋은 중고, H8)
+reject = [{ action = "목표 조정", why = "H8: 졸업작품 때문에 3월 중순까지는 꼭 있어야 한다" }]
+effect = { goal = true }
+
+[[responses]]
+id = "laptop_saving"
+target = { words = ["적금", "저축", "떼어"] }
+facts = ["H3", "H10", "H12"]
+accept = [{ action = "저축 늘리기", max_amount = 50000 }]
+reject = [
+  { action = "저축 늘리기", during = [2026-12-01, 2027-01-07], why = "H10: 알바비가 적어 월세도 빠듯하다. 지금은 못 넣는다" },
+  { action = "저축 늘리기", why = "H12: 2월 월세까지 버틸 수 있을지 걱정돼 5만 원 넘게는 못 넣는다" },
+]
+effect = { new_monthly = "laptop_saving", day = 11, category = "저축" }   # 내 돈의 이동이라 절약액에는 안 잡힌다
+
+[[responses]]
+id = "alba_income"
+target = { words = ["알바", "근무"] }
+facts = ["H2", "H11"]
+reject = [{ action = "수입 늘리기", why = "H2: 카페가 근무 시간을 줄였다. 방학에는 이미 주 3회로 늘었다 (H11)" }]
+
+[[responses]]
+id = "parents_support"
+target = { words = ["부모님", "용돈", "엄마"] }
+facts = ["H4", "H10"]
+reject = [{ action = "*", why = "H10: 엄마한테 또 부탁하기는 미안하다" }]
+
+# ---------------------------------------------------------------- 자기 기록 효과 (앱만 써도 생기는 변화, docs/10 §3, 크기는 가정)
+# ratio 는 '중간' 크기다. 평가에서는 크기 배율(없음 0 · 작게 0.5 · 중간 1)을 바꿔 가며 LLM 순위가 같은지 본다.
+[[self_effects]]
+id = "delivery_records"
+trigger = { records = ["배달"], count = 3, window_days = 14 }
+effect = { habits = ["delivery"], ratio = 0.2 }
+hold_days = 14
+keep_after = 0.0
+why = "배달을 자주 기록하다 보면 스스로 의식하게 된다 (R5 피곤해서 배달)"
+
+[[self_effects]]
+id = "goal_behind"
+trigger = { goal_behind = true }
+effect = { habits = ["conv", "delivery", "cafe"], ratio = 0.1 }
+hold_days = 31
+keep_after = 0.0
+why = "말일에 앱에서 노트북 목표에 못 미친 것을 보면 다음 달 군것질·배달·커피를 조금 아낀다"
 
 # ---------------------------------------------------------------- 평가 케이스 (정답은 근거와 함께, 숫자는 truth.json 의 계산값)
 # target: data = 적재·집계 코드(B)가 맞춰야 함, agent = 에이전트(A) 행동

@@ -19,7 +19,7 @@
 |---|---|---|
 | A 검색·에이전트 (Broogun) | 단일 에이전트 기준선 P1 실행 (gpt-6.1-terra, 통과 2·부분 2·실패 5) → [리포트](reports/261126-2030-a-single-agent-p1-baseline.md) | 채점 보강 후 반복·P2~P5 |
 | B 데이터·평가 (parky2won) | - | - |
-| C 화면·연동 (KIM-YUNHO) | 데모 거래 데이터: 통합 거래내역(입력 경로 B 가정) 생성기 + P1~P5 초안(PR #8 머지), Supabase 열람용 공유(5명, 1/31까지), 시연 시나리오 초안 → [09](09-demo-scenario.md), LLM 평가 단계 1: 데모 데이터 1/31까지 연장·기간 중 쟁점 추가 (원래 2주는 그대로) → [리포트](reports/261127-0146-c-demo-live-extension.md), P1 기준선을 기록 응답으로 채점할 수 있는 케이스만 돌리는 스크립트 (`scripts/eval_single_agent_p1_reply_cases.py`) | 입력 경로 B 팀 확인, 기록 형식(3명) 합의 |
+| C 화면·연동 (KIM-YUNHO) | 데모 거래 데이터: 통합 거래내역(입력 경로 B 가정) 생성기 + P1~P5 초안(PR #8 머지), Supabase 열람용 공유(5명, 1/31까지), 시연 시나리오 초안 → [09](09-demo-scenario.md), LLM 평가 단계 1: 데모 데이터 1/31까지 연장·기간 중 쟁점 추가 (원래 2주는 그대로) → [리포트](reports/261127-0146-c-demo-live-extension.md), P1 기준선을 기록 응답으로 채점할 수 있는 케이스만 돌리는 스크립트 (`scripts/eval_single_agent_p1_reply_cases.py`), 싱글 에이전트 기준선 + 비교 하네스 초안 (`src/spending_agent/baseline/`, 가짜 LLM으로만 검증) → [리포트](reports/261127-1119-c-single-agent-baseline.md), LLM 평가 단계 2: 반응 규칙·자기 기록 효과 초안 P1~P5, 세 세계 비교 → [리포트](reports/261127-1135-c-response-rules.md) | 입력 경로 B 팀 확인, 기록 형식(3명) 합의 |
 
 ## 열린 질문
 - 검색 기반으로 바꾸면서 남길 기능 범위 (구독 점검·목표 계산을 유지할지) → [03](03-product-plan.md)

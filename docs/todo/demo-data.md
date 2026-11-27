@@ -33,7 +33,7 @@
 - [x] Supabase 프로젝트 만들고 첫 `publish` (5명 전체, 실제 연결 테스트 통과)
 - [ ] 팀원을 Supabase 프로젝트에 초대 (C)
 - [x] LLM 평가용 데이터 보강: 1/31까지 연장, 기간 중 쟁점 페르소나당 3개, 기록 습관, 시점별 정답 (원래 2주는 그대로) → [10 §8](../10-llm-eval-plan.md), [리포트](../reports/261127-0146-c-demo-live-extension.md)
-- [ ] 반응 규칙(`[[responses]]`) 초안 → [10 §4](../10-llm-eval-plan.md) (단계 2)
+- [x] 반응 규칙(`[[responses]]`)·자기 기록 효과(`[[self_effects]]`) 초안 P1~P5 → [10 §3·§4](../10-llm-eval-plan.md) (단계 2, 검토 대기)
 - [x] PR 머지 뒤 공유 DB 다시 올리기 (`publish`, 1/31까지. live 테스트 통과)
 - [x] 연장으로 늘어난 케이스 때문에 P1 기준선 채점이 틀어지지 않게 하기: 원래 스크립트는 두고 `scripts/eval_single_agent_p1_reply_cases.py`로 걸러서 실행 (`spending_agent.demo.cases.reply_cases`)
 - [ ] 생성기 확장: 해외결제, 사용자 선택 분기(수락/거절에 따라 이후 거래가 바뀜)

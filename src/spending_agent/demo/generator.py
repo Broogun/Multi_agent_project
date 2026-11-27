@@ -86,15 +86,23 @@ def personas() -> list[str]:
     return sorted(f.stem for f in PERSONA_DIR.glob("*.toml"))
 
 
-def build_world(p: dict) -> World:
+def history_start(p: dict) -> dt.date:
+    """온보딩 내역 첫날 (D0 의 history_months 달 전)."""
     d0 = p["d0"]
     y, m = divmod(d0.year * 12 + d0.month - 1 - p.get("history_months", 3), 12)
-    start, end = dt.date(y, m + 1, min(d0.day, 28)), d0 + dt.timedelta(days=p["live_days"])
+    return dt.date(y, m + 1, min(d0.day, 28))
+
+
+def build_world(p: dict) -> World:
+    d0 = p["d0"]
+    start, end = history_start(p), d0 + dt.timedelta(days=p["live_days"])
     credit = p["accounts"]["card"].get("kind") == "신용"
 
     groups: dict[str, dict] = {}
     events = (_monthly(p, start, end, groups) + _habits(p, start, end) + _irregular(p, start, end)
               + _club_rule(p, start, end, groups) + _scripted(p, groups))
+    events = _caps(p, events)                 # 아래 둘은 반응 규칙(서비스 있음 세계)으로만 생긴다
+    events += _reimbursements(p, events)
     by_id = {e.id: e for e in events}
     if len(by_id) != len(events):
         raise ValueError(f"{p['id']}: 이벤트 id 중복")
@@ -166,6 +174,17 @@ def _boost(rule: dict, day: dt.date) -> float:
             hit = b["from"] <= day <= b["until"]
         factor *= b["factor"] if hit else 1.0
     return factor
+
+
+def _price(rule: dict, day: dt.date, amount: int) -> int:
+    """가격 변화 (price_changes: 반응 규칙으로만 생김, 예: 저가 테이크아웃으로 바꾸기). 난수는 쓰지 않는다."""
+    factor = 1.0
+    for c in rule.get("price_changes", []):
+        factor *= c["factor"] if c["from"] <= day <= c["until"] else 1.0
+    if factor == 1.0:
+        return amount
+    step = rule.get("step", 100)
+    return max(step, round(amount * factor / step) * step)
 
 
 def _time(rng: random.Random, day: dt.date, hours: list[int]) -> dt.datetime:
@@ -246,8 +265,8 @@ def _habits(p: dict, start: dt.date, end: dt.date) -> list[Event]:
             rng = _rng(p, f"{day}:{rule['id']}")
             if rng.random() >= min(1.0, rule["prob"][day.weekday()] * _boost(rule, day)):
                 continue
-            e = Event(f"{rule['id']}-{day:%Y%m%d}", _time(rng, day, rule["hours"]), "purchase",
-                      _amount(rng, rule["amount"], rule.get("step", 100)), _channel(rng, rule),
+            at, amount = _time(rng, day, rule["hours"]), _amount(rng, rule["amount"], rule.get("step", 100))
+            e = Event(f"{rule['id']}-{day:%Y%m%d}", at, "purchase", _price(rule, day, amount), _channel(rng, rule),
                       rule["category"], rng.choice(rule["merchants"]))
             out += [e, *_maybe_cancel(p, rule, e)]
     return out
@@ -285,6 +304,8 @@ def _club_rule(p: dict, start: dt.date, end: dt.date, groups: dict) -> list[Even
         people = rng.randint(*rule["people"])
         total = _amount(rng, [rule["per_person"][0] * people, rule["per_person"][1] * people])
         unpaid = sum(rng.random() >= rule["repay_prob"] for _ in range(people - 1))
+        if "prepaid_from" in rule and day >= rule["prepaid_from"]:   # 회식 전에 미리 걷기 (반응 규칙)
+            unpaid = 0
         out += _split(p, f"club-{day:%Y%m%d}", _time(rng, day, rule["hours"]), rng.choice(rule["merchants"]),
                       people, total, unpaid, None, rng, groups, rule)
     return out
@@ -310,13 +331,46 @@ def _scripted(p: dict, groups: dict) -> list[Event]:
     out = []
     for s in p.get("events", []):
         if s.get("type") == "club":
-            out += _split(p, s["id"], s["at"], s["merchant"], s["people"], s["total"], s["unpaid"],
+            prepaid = "prepaid_from" in p["club"] and s["at"].date() >= p["club"]["prepaid_from"]
+            out += _split(p, s["id"], s["at"], s["merchant"], s["people"], s["total"], 0 if prepaid else s["unpaid"],
                           s.get("delay_days"), _rng(p, s["id"]), groups, p["club"])
         elif s["kind"] == "cancel":
             out.append(Event(s["id"], s["at"], "cancel", 0, "", "", ref=s["ref"], delay_days=s.get("delay_days")))
         else:
             out.append(Event(s["id"], s["at"], s["kind"], s["amount"], s.get("channel", "account"), s["category"],
                              s.get("merchant"), s.get("delay_days"), installment=s.get("installment_months", 0)))
+    return out
+
+
+def _caps(p: dict, events: list[Event]) -> list[Event]:
+    """월 상한 (caps: 반응 규칙으로만 생김). from 이후 이 용도 결제가 그달 합계를 상한 위로 올리면 그 결제는 안 한다."""
+    drop: set[str] = set()
+    for c in p.get("caps", []):
+        spent: dict[str, int] = {}
+        for e in sorted((e for e in events if e.kind == "purchase" and e.category == c["category"]), key=_order):
+            ym = f"{e.at:%Y-%m}"
+            if e.at.date() >= c["from"] and spent.get(ym, 0) + e.amount > c["amount"]:
+                drop.add(e.id)
+                continue
+            spent[ym] = spent.get(ym, 0) + e.amount
+    return [e for e in events if e.id not in drop and not (e.kind == "cancel" and e.ref in drop)]
+
+
+def _reimbursements(p: dict, events: list[Event]) -> list[Event]:
+    """경비 환급 (reimbursements: 반응 규칙으로만 생김). from 이후 after_hour 시 이후의 이 습관 결제를 모아
+    다음 달 pay_day 에 입금받는다."""
+    out = []
+    for r in p.get("reimbursements", []):
+        by_month: dict[tuple[int, int], int] = {}
+        for e in events:
+            if (e.kind == "purchase" and e.id.startswith(f"{r['habit']}-") and e.at.date() >= r["from"]
+                    and e.at.hour >= r["after_hour"]):
+                by_month[(e.at.year, e.at.month)] = by_month.get((e.at.year, e.at.month), 0) + e.amount
+        for (y, m), amount in sorted(by_month.items()):
+            ny, nm = (y + 1, 1) if m == 12 else (y, m + 1)
+            day = dt.date(ny, nm, min(r["pay_day"], _last_day(ny, nm)))
+            out.append(Event(f"reimburse-{r['habit']}-{y}{m:02d}", dt.datetime.combine(day, dt.time(10, 0)),
+                             "transfer_in", amount, "account", "경비 환급", export=r.get("export")))
     return out
 
 
@@ -536,10 +590,14 @@ def _issues(p, by_id, rows, points) -> list[dict]:
             raise ValueError(f"{p['id']} {i['id']}: 모르는 쟁점 유형 {i['type']}")
         if i["detect_by"].isoformat() not in dates or not i["from"] <= i["detect_by"]:
             raise ValueError(f"{p['id']} {i['id']}: detect_by 는 from 이후의 피드백 날짜여야 함")
+        prevented = []
         for ev in i.get("evidence", []):
-            if ev not in by_id or by_id[ev].visible_on > i["detect_by"]:
+            if ev not in by_id and p.get("_modified"):   # ②·③ 세계: 바뀐 소비로 근거 거래가 안 생겼다 (막은 쟁점)
+                prevented.append(ev)
+            elif ev not in by_id or by_id[ev].visible_on > i["detect_by"]:
                 raise ValueError(f"{p['id']} {i['id']}: 근거 {ev} 가 detect_by 까지 들어오지 않음")
-        out.append({**i, "evidence_tx": [rows[ev]["거래ID"] for ev in i.get("evidence", [])]})
+        item = {**i, "evidence_tx": [rows[ev]["거래ID"] for ev in i.get("evidence", []) if ev in by_id]}
+        out.append(item | ({"prevented": prevented} if prevented else {}))
     return out
 
 
@@ -693,7 +751,8 @@ def _truth(p, events, by_id, rows, groups, record_meta, balance, bills, start, d
                         "true_category": e.category, "amount": e.amount, "group": e.group, "ref": e.ref,
                         "installment": e.installment} for e in events],
         },
-        "user_sim": {"fixed_answers": fixed, "hidden_facts": p.get("hidden_facts", [])},
+        "user_sim": {"fixed_answers": fixed, "hidden_facts": p.get("hidden_facts", []),
+                     "responses": p.get("responses", [])},          # 반응 규칙 (서비스 있음 세계, docs/10 §4)
         "rubric": {"problems": p.get("problems", []), "issues": issues, "cases": cases},
     }
 
