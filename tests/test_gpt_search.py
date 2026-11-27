@@ -12,6 +12,8 @@ from spending_agent.search.gpt_search import (
     extract_sources,
     filter_sources,
     in_allowed,
+    is_file_or_landing,
+    page_key,
 )
 
 ALLOWED = ["smartchoice.or.kr", "kt.com"]
@@ -74,3 +76,28 @@ def test_empty_result_message():
 def test_requires_allowed_domains():
     with pytest.raises(ValueError):
         GPTSearch(model="m", client=FakeClient(NS(output=[]))).panel("q", [])
+
+
+def test_same_page_on_mobile_api_hosts_is_one_link():
+    urls = ["https://m.smartchoice.or.kr/smc/plan/planCompare.do", "https://api.smartchoice.or.kr/smc/plan/planCompare.do",
+            "https://smartchoice.or.kr/smc/plan/planCompare.do?type=m", "https://www.smartchoice.or.kr/smc/plan/planCompare.do/"]
+    assert len({page_key(u) for u in urls}) == 1
+    out = filter_sources([{"url": u, "title": ""} for u in urls], ALLOWED)
+    assert len(out) == 1
+
+
+def test_files_attachments_and_home_are_dropped():
+    for u in ["https://smartchoice.or.kr/smc/download.do?fileName=a.pdf&path=x", "https://m.corp.kt.com/attach/board/1/2/a",
+              "https://smartchoice.or.kr/smc/resources/upload/guide/a.pdf", "https://m.smartchoice.or.kr/smc/",
+              "https://m.product.kt.com/"]:
+        assert is_file_or_landing(u), u
+    assert not is_file_or_landing("https://product.kt.com/wDic/productDetail.do?ItemCode=1013")
+
+
+def test_titles_from_citation_or_path_label():
+    raw = [{"url": "https://m.smartchoice.or.kr/smc/plan/planCompare.do", "title": ""},
+           {"url": "https://smartchoice.or.kr/smc/plan/planCompare.do", "title": "요금제 비교 검색"},
+           {"url": "https://product.kt.com/wDic/productDetail.do?ItemCode=1", "title": ""},
+           {"url": "https://kt.com/some/thing/x.do", "title": "https://kt.com/some"}]
+    out = filter_sources(raw, ALLOWED)
+    assert [s["title"] for s in out] == ["요금제 비교 검색", "KT 상품 상세", "KT 페이지"]

@@ -20,6 +20,16 @@ from ..contracts import SEARCH_NOTICE, SearchPanelEvent, SearchSource
 TRACKING_PREFIXES = ("utm_",)
 TRACKING_KEYS = {"gclid", "fbclid", "ref", "ref_src", "source"}
 MAX_LINKS = 8
+# 같은 페이지의 모바일·API 주소는 하나로 본다
+HOST_ALIASES = ("www.", "m.", "mobile.", "api.")
+VIEW_PARAMS = {"type"}            # 화면 전환용 파라미터 (같은 페이지)
+# 파일·첨부는 요금제 안내가 아니라 뺀다
+FILE_HINTS = ("download", "/attach/", "/upload/")
+FILE_EXTS = (".pdf", ".hwp", ".hwpx", ".zip", ".xlsx", ".xls", ".doc", ".docx", ".ppt", ".pptx")
+# 페이지를 열 수 없어서, 제목이 없을 때는 주소 경로로 이름을 붙인다 (경로 이름 기반, 확인된 페이지 제목이 아님)
+SITE_NAMES = {"smartchoice.or.kr": "스마트초이스", "kt.com": "KT", "sktelecom.com": "SKT", "lguplus.com": "LG U+"}
+PATH_LABELS = (("plancompare", "요금제 비교"), ("catalog", "요금제 목록"), ("recomend_search", "맞춤 요금제 찾기"),
+               ("prepay", "선불 요금제"), ("productdetail", "상품 상세"))
 PANEL_TEXT = "이 조건으로 찾은 링크예요. 실제 요금과 조건은 각 사이트에서 확인하세요."
 EMPTY_TEXT = "조건에 맞는 링크를 찾지 못했어요. 조건을 바꿔 다시 찾아볼까요?"
 INSTRUCTIONS = ("허용된 사이트에서 조건에 맞는 요금제 안내 페이지를 찾아라. 가격을 단정하지 말고, "
@@ -39,6 +49,42 @@ def _host(url: str) -> str:
     return h.lower().removeprefix("www.")
 
 
+def _base_host(url: str) -> str:
+    """m. · www. · api. 를 뗀 호스트 (같은 페이지 판단용)."""
+    h = (urlsplit(url).hostname or "").lower()
+    changed = True
+    while changed:
+        changed = False
+        for a in HOST_ALIASES:
+            if h.startswith(a) and h.count(".") > 1:
+                h, changed = h[len(a):], True
+    return h
+
+
+def page_key(url: str) -> str:
+    sp = urlsplit(url)
+    q = sorted((k, v) for k, v in parse_qsl(sp.query, keep_blank_values=True) if k.lower() not in VIEW_PARAMS)
+    return f"{_base_host(url)}{sp.path.rstrip('/').lower()}?{urlencode(q)}"
+
+
+def is_file_or_landing(url: str) -> bool:
+    """파일 다운로드·첨부·홈 화면은 요금제 안내 링크가 아니다."""
+    sp = urlsplit(url)
+    low = (sp.path + "?" + sp.query).lower()
+    if any(h in low for h in FILE_HINTS) or sp.path.lower().endswith(FILE_EXTS):
+        return True
+    segs = [x for x in sp.path.split("/") if x]
+    return len(segs) <= 1 and not sp.query and (not segs or sp.path.endswith("/"))   # 홈 · 첫 화면 (/, /smc/)
+
+
+def label_for(url: str, allowed: list[str]) -> str:
+    h = _host(url)
+    site = next((SITE_NAMES.get(d, d) for d in allowed if h == d or h.endswith("." + d)), h)
+    path = urlsplit(url).path.lower()
+    page = next((name for key, name in PATH_LABELS if key in path), "페이지")
+    return f"{site} {page}"
+
+
 def in_allowed(url: str, allowed: list[str]) -> bool:
     """허용 도메인 또는 그 하위 도메인인가 (필터가 일부 무시된다는 제보가 있어 코드로 다시 거른다)."""
     h = _host(url)
@@ -48,6 +94,11 @@ def in_allowed(url: str, allowed: list[str]) -> bool:
 def filter_sources(raw: list[dict], allowed: list[str], official: set[str] | None = None) -> list[SearchSource]:
     """표시 전 필터. raw: [{"url", "title"}]. 순서는 공식 먼저, 그다음 원래 순서."""
     official = official or set()
+    titles: dict[str, str] = {}               # 같은 페이지에 제목이 있는 출처가 있으면 그 제목을 쓴다
+    for r in raw:
+        t, url = (r.get("title") or "").strip(), r.get("url") or ""
+        if t and url and t != url and not t.startswith("http"):
+            titles.setdefault(page_key(clean_url(url)), t)
     seen: set[str] = set()
     out: list[tuple[int, int, SearchSource]] = []
     for i, r in enumerate(raw):
@@ -55,12 +106,13 @@ def filter_sources(raw: list[dict], allowed: list[str], official: set[str] | Non
         if not url.startswith(("http://", "https://")) or not in_allowed(url, allowed):
             continue
         u = clean_url(url)
-        sp = urlsplit(u)
-        key = f"{_host(u)}{sp.path.rstrip('/')}?{sp.query}"     # www 유무·끝 / 만 다른 주소는 같은 링크로 본다
+        if is_file_or_landing(u):
+            continue
+        key = page_key(u)                    # m.·www.·api.·type=m 만 다른 주소는 같은 페이지
         if key in seen:
             continue
         seen.add(key)
-        title = (r.get("title") or "").strip() or _host(u)
+        title = titles.get(key) or label_for(u, allowed)
         rank = 0 if any(_host(u) == d or _host(u).endswith("." + d) for d in official) else 1
         out.append((rank, i, {"title": title, "uri": u}))
     out.sort(key=lambda t: (t[0], t[1]))
