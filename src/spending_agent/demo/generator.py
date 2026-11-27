@@ -7,6 +7,9 @@
 
 난수는 (페르소나, 날짜, 규칙)마다 따로 고정한다. 그래서 같은 페르소나는 항상 같은 결과가 나오고,
 운영 기간을 늘려도 이전 날짜의 거래는 바뀌지 않는다.
+
+운영 단계 (docs/10): 거래는 매일 쌓이고, 유저 기록(유저 이벤트)마다 유저 이해가 돈다.
+유저에게 말하는 것은 피드백 시점(온보딩, 일요일 저녁 주간, 말일 저녁 월간)뿐이다.
 """
 from __future__ import annotations
 
@@ -28,6 +31,15 @@ NON_PURCHASE_ROWS = {
     "transfer_out": ("이체", "미분류", "", "출금"),
     "atm": ("지출", "현금", "ATM출금", "ATM 출금"),
 }
+
+FEEDBACK_HOUR = 21   # 주간·월간 피드백은 저녁에 돈다. 이 시각 뒤에 쓴 기록은 다음 피드백에서 다룬다
+# 쟁점 유형 (초안, docs/10 §5). 페르소나별 정답이 아니라 어느 유저에게나 쓸 수 있는 일반 목록이다
+ISSUE_TYPES = ("정기결제 중복", "정기결제 가격 변경", "새 정기결제", "해지 안 된 정기결제", "습관 지출 증가",
+               "요일·시간 집중", "일시적 변화", "일회성 큰 지출", "할부", "대표결제·정산", "이름 없는 이체",
+               "앱 분류 확인", "현금 사용", "수입 변화", "정기 이체 중단", "잔액 부족", "목표 진척")
+# 시점별 쟁점 상태 (서비스 없는 기준 세계). 아직: 신호 없음 / 선택: 신호가 생겼지만 짚지 않아도 됨 /
+# 필수: 짚어야 함 / 종료: 끝남 (앞에서 짚었다면 해결로 갱신해야 함)
+STATUSES = ("아직", "선택", "필수", "종료")
 
 
 @dataclass
@@ -62,6 +74,7 @@ class World:
     batches: dict[str, list[dict]]        # "onboarding" | YYYY-MM-DD → 행
     records: dict[str, list[dict]]        # YYYY-MM-DD → 유저 기록
     truth: dict
+    feedback: list[dict]                  # 피드백 시점 [{date, kind}] (에이전트도 알아도 되는 일정)
 
 
 def load_persona(pid: str) -> dict:
@@ -104,9 +117,11 @@ def build_world(p: dict) -> World:
     for b in bills:
         b["bill_tx"] = rows[b.pop("event_id")]["거래ID"]
     batches = _batches(events, rows, d0, end)
-    records = _records(p, by_id, rows)
-    truth = _truth(p, events, by_id, rows, groups, records, balance, bills, start, d0, end)
-    return World(p, start, d0, end, events, rows, batches, records, truth)
+    points = feedback_points(d0, end)
+    records, record_meta = _records(p, events, by_id, rows, points, d0, end)
+    issues = _issues(p, by_id, rows, points)
+    truth = _truth(p, events, by_id, rows, groups, record_meta, balance, bills, start, d0, end, points, issues)
+    return World(p, start, d0, end, events, rows, batches, records, truth, points)
 
 
 # ---------------------------------------------------------------- 이벤트 생성
@@ -447,20 +462,172 @@ def _batches(events, rows, d0, end) -> dict[str, list[dict]]:
     return batches
 
 
-def _records(p, by_id, rows) -> dict[str, list[dict]]:
-    """유저 기록. 기록 시점에 이미 들어온 거래만 transaction_id 로 연결된다 (앱에서 고를 수 있는 것)."""
+def feedback_points(d0: dt.date, end: dt.date) -> list[dict]:
+    """피드백 시점: 온보딩(D0) → 주간(일요일 저녁) · 월간(말일 저녁). 같은 날이면 월간 하나로 합친다."""
+    out = [{"date": d0.isoformat(), "kind": "onboarding"}]
+    for d in _days(d0 + DAY, end):
+        if d.day == _last_day(d.year, d.month):
+            out.append({"date": d.isoformat(), "kind": "monthly"})
+        elif d.weekday() == 6:
+            out.append({"date": d.isoformat(), "kind": "weekly"})
+    return out
+
+
+def _cutoff(point: dict) -> dt.datetime:
+    """그 피드백이 보는 마지막 순간. 온보딩은 D0가 시작될 때, 주간·월간은 그날 저녁."""
+    hour = 0 if point["kind"] == "onboarding" else FEEDBACK_HOUR
+    return dt.datetime.combine(dt.date.fromisoformat(point["date"]), dt.time(hour))
+
+
+def next_feedback(points: list[dict], at: dt.datetime) -> str | None:
+    """이 시각의 유저 이벤트를 처음 다루는 피드백 날짜."""
+    return next((pt["date"] for pt in points if at <= _cutoff(pt)), None)
+
+
+def _habit_records(p, events, rows, skip: set[str], d0: dt.date, end: dt.date) -> list[dict]:
+    """기록 습관: 이런 거래는 이 확률로, 들어온 뒤 며칠 안에 골라서 기록한다. 문장은 페르소나 파일의 틀에서 고른다
+    (LLM으로 만들지 않는다). 거래에서 나오므로, 소비가 바뀌면 기록도 따라 바뀐다."""
+    out, used = [], set()
+    for rule in p.get("record_habits", []):
+        for e in events:
+            if e.kind != "purchase" or e.category not in rule["categories"] or e.id in skip:
+                continue
+            rng = _rng(p, f"{e.id}:record:{rule['id']}")
+            if rng.random() >= rule["prob"]:
+                continue
+            day = e.visible_on + dt.timedelta(days=rng.randint(*rule.get("delay_days", [1, 1])))
+            written = _time(rng, day, rule["hours"])
+            text = rng.choice(rule["texts"]).format(merchant=rows[e.id]["내용"], amount=f"{e.amount:,}")
+            if d0 <= day < end and _active(rule, day) and (rule["id"], day) not in used:   # 같은 습관은 하루 1건
+                used.add((rule["id"], day))
+                out.append({"id": f"R-{tx_id(e.id)}", "written_at": written, "about": e.id, "text": text,
+                            "source": "habit", "rule": rule["id"]})
+    return out
+
+
+def _records(p, events, by_id, rows, points, d0, end) -> tuple[dict[str, list[dict]], list[dict]]:
+    """유저 기록 = 시나리오에 직접 쓴 기록 + 기록 습관으로 만든 기록.
+    기록 시점에 이미 들어온 거래만 transaction_id 로 연결된다 (앱에서 고를 수 있는 것)."""
+    scripted = [{**r, "source": "scripted"} for r in p.get("records", [])]
+    items = scripted + _habit_records(p, events, rows, {r["about"] for r in scripted if "about" in r}, d0, end)
+    if len({r["id"] for r in items}) != len(items):
+        raise ValueError(f"{p['id']}: 기록 id 중복")
     out: dict[str, list[dict]] = {}
-    for r in p.get("records", []):
+    meta = []
+    for r in sorted(items, key=lambda r: r["written_at"]):
         written, e = r["written_at"], by_id.get(r.get("about", ""))
         linked = e is not None and e.visible_on < written.date()
         out.setdefault(written.date().isoformat(), []).append(
             {"record_id": r["id"], "user_id": p["user_id"], "written_at": written.isoformat(), "text": r["text"],
              "amount": r.get("amount"), "transaction_id": rows[e.id]["거래ID"] if linked else None})
-    return out
+        meta.append({"record_id": r["id"], "written_at": written.isoformat(), "source": r["source"],
+                     "rule": r.get("rule"), "about_event": r.get("about"),
+                     "about_tx": rows[e.id]["거래ID"] if e else None, "linked_when_written": linked,
+                     "feedback_at": next_feedback(points, written), "learn": r.get("learn", [])})
+    return out, meta
 
 
 # ---------------------------------------------------------------- 정답 (평가 전용)
-def _truth(p, events, by_id, rows, groups, records, balance, bills, start, d0, end) -> dict:
+def _issues(p, by_id, rows, points) -> list[dict]:
+    """기간 중 쟁점 (운영 중에 새로 생기거나 바뀌는 것). 근거 거래가 detect_by 피드백 전에 들어와 있어야 한다."""
+    dates, out = {pt["date"] for pt in points}, []
+    for i in p.get("issues", []):
+        if i["type"] not in ISSUE_TYPES:
+            raise ValueError(f"{p['id']} {i['id']}: 모르는 쟁점 유형 {i['type']}")
+        if i["detect_by"].isoformat() not in dates or not i["from"] <= i["detect_by"]:
+            raise ValueError(f"{p['id']} {i['id']}: detect_by 는 from 이후의 피드백 날짜여야 함")
+        for ev in i.get("evidence", []):
+            if ev not in by_id or by_id[ev].visible_on > i["detect_by"]:
+                raise ValueError(f"{p['id']} {i['id']}: 근거 {ev} 가 detect_by 까지 들어오지 않음")
+        out.append({**i, "evidence_tx": [rows[ev]["거래ID"] for ev in i.get("evidence", [])]})
+    return out
+
+
+def _status(item: dict, day: dt.date) -> str:
+    if "from" in item and day < item["from"]:
+        return "아직"
+    if "until" in item and day > item["until"]:
+        return "종료"
+    if "detect_by" in item and day < item["detect_by"]:
+        return "선택"
+    return "필수"
+
+
+def _cases(p, record_meta, issues, points, d0) -> list[dict]:
+    """평가 케이스마다 확인할 피드백 날짜(check_at)를 붙인다.
+    온보딩 = D0, 기록 케이스 = 그 기록 뒤 첫 피드백, 쟁점 케이스 = 쟁점의 detect_by, 없으면 매일 (None)."""
+    written = {r["record_id"]: r["feedback_at"] for r in record_meta}
+    detect = {i["id"]: i["detect_by"].isoformat() for i in issues}
+    dates, out = {pt["date"] for pt in points}, []
+    for c in p.get("cases", []):
+        if c["phase"] == "onboarding":
+            at = d0.isoformat()
+        elif "check_at" in c:
+            at = c["check_at"].isoformat()
+        elif "record" in c:
+            at = written[c["record"]]
+        elif "issue" in c:
+            at = detect[c["issue"]]
+        else:
+            at = None
+        if at is not None and at not in dates:
+            raise ValueError(f"{p['id']} {c['id']}: check_at {at} 은 피드백 날짜가 아님")
+        out.append({**c, "check_at": at})
+    return out
+
+
+def goal_progress(p: dict, events: list[Event], d0: dt.date, upto: dt.date) -> dict | None:
+    """목표 달성도 (가정, docs/10 §3). upto 까지 들어온 D0 이후 내역 기준 (내역에 찍힌 달로 나눈다).
+    - 진척 = 현재 저축액 + 끝난 달들의 (수입 − 지출). 필요 = 필요 월 저축액 × 끝난 달 수.
+      이번 달은 월급 전후로 크게 흔들리므로 진척에 넣지 않고 지금까지의 수입·지출만 따로 보여준다.
+    - 저축 이체는 내 돈의 이동이라 지출이 아니다. 카드대금·머니 충전도 이미 센 돈이라 빼지 않는다.
+    - 현금 인출은 쓴 돈으로 본다. 정산 입금과 환불은 지출에서 뺀다.
+    - 목표를 위해 쓴 돈(goal_tracking.goal_categories, 예: 여행 예약)은 지출이 아니라 목표에 쓴 돈으로 진척에 넣는다."""
+    goal = _goal(p.get("onboarding", {}).get("fixed_answers", {}).get("goal"), d0)
+    if not goal:
+        return None
+    cats = set(p.get("goal_tracking", {}).get("goal_categories", []))
+    months = {f"{y}-{m:02d}": {"month": f"{y}-{m:02d}", "income": 0, "spend": 0, "goal_spend": 0,
+                               "done": dt.date(y, m, _last_day(y, m)) <= upto} for y, m in _months(d0, upto + DAY)}
+    for e in events:
+        if e.at.date() < d0 or e.visible_on > upto:
+            continue
+        b, sign = months[f"{e.at:%Y-%m}"], -1 if e.kind == "cancel" else 1
+        if e.kind in ("purchase", "cancel"):
+            b["goal_spend" if e.category in cats else "spend"] += sign * e.amount
+        elif e.kind == "transfer_in" and e.group:
+            b["spend"] -= e.amount
+        elif e.kind == "transfer_in":
+            b["income"] += e.amount
+        elif e.kind == "atm" or (e.kind == "transfer_out" and e.category != "저축"):
+            b["spend"] += e.amount
+    for b in months.values():
+        b["net"] = b["income"] - b["spend"]
+    done = [b for b in months.values() if b.pop("done")]
+    current = next((b for b in months.values() if b not in done), None)
+    gained = sum(b["net"] for b in done)
+    required = goal["monthly_required"] * len(done)
+    return {"through": upto.isoformat(), "goal_amount": goal["amount"], "current_saved": goal["current_saved"],
+            "monthly_required": goal["monthly_required"], "months_done": done, "progress": goal["current_saved"] + gained,
+            "required_by_now": required, "on_track": gained >= required if done else None, "this_month": current,
+            "calc": (f"현재 저축 {goal['current_saved']:,} + 끝난 달 (수입 − 지출) {gained:,} = "
+                     f"{goal['current_saved'] + gained:,} / 필요 {goal['monthly_required']:,} × {len(done)}개월 = "
+                     f"{required:,} (목표용 지출은 지출에서 빼고 목표에 쓴 돈으로 본다)")}
+
+
+def _timeline(p, events, points, issues, cases, d0) -> list[dict]:
+    """피드백 시점마다: 쟁점별 상태(기준 세계), 그때 확인할 케이스, 목표 달성도."""
+    items = p.get("problems", []) + issues
+    out = []
+    for pt in points:
+        day = dt.date.fromisoformat(pt["date"])
+        out.append({**pt, "issues": {i["id"]: _status(i, day) for i in items},
+                    "cases": [c["id"] for c in cases if c["check_at"] == pt["date"]],
+                    "goal_progress": goal_progress(p, events, d0, day)})
+    return out
+
+
+def _truth(p, events, by_id, rows, groups, record_meta, balance, bills, start, d0, end, points, issues) -> dict:
     monthly: dict[str, dict] = {}
 
     def month(e: Event) -> dict:
@@ -498,16 +665,16 @@ def _truth(p, events, by_id, rows, groups, records, balance, bills, start, d0, e
         dutch.append({**g, "paid_count": len(repaid), "received": received, "net_cost": g["total"] - received,
                       "payment_tx": rows[gid]["거래ID"], "repayment_tx": [rows[e.id]["거래ID"] for e in repaid]})
 
-    about = {r["id"]: r.get("about") for r in p.get("records", [])}
     history = [f"{y}-{m:02d}" for y, m in _months(start, d0)]
     fixed = p.get("onboarding", {}).get("fixed_answers", {})
+    cases = _cases(p, record_meta, issues, points, d0)
     return {
         "note": ("facts = 생성 코드가 계산한 사실(정확), user_sim = 유저 역할 시뮬레이터가 답할 내용, "
                  "rubric = 우리가 정한 채점 기준(정답 문장이 아님). 모두 가상 세계 기준이다. "
                  "적재·분석 코드와 에이전트 입력에 넣지 않는다."),
         "persona": p["id"], "user_id": p["user_id"],
         "period": {"history": [start.isoformat(), (d0 - DAY).isoformat()],
-                   "live": [d0.isoformat(), (end - DAY).isoformat()]},
+                   "live": [d0.isoformat(), (end - DAY).isoformat()], "feedback": points},
         "facts": {
             "goal": _goal(fixed.get("goal"), d0),
             "levers": _levers(p, monthly, groups, by_id, history),
@@ -519,17 +686,15 @@ def _truth(p, events, by_id, rows, groups, records, balance, bills, start, d0, e
             "dutch_groups": dutch,
             "cancels": [{"original_tx": rows[e.ref]["거래ID"], "cancel_tx": rows[e.id]["거래ID"]}
                         for e in events if e.kind == "cancel"],
-            "records": [{"record_id": r["record_id"], "about_event": about[r["record_id"]],
-                         "about_tx": rows[about[r["record_id"]]]["거래ID"] if about[r["record_id"]] else None,
-                         "linked_when_written": r["transaction_id"] is not None}
-                        for day in records.values() for r in day],
+            "records": record_meta,
+            "timeline": _timeline(p, events, points, issues, cases, d0),
             "events": [{"tx_id": rows[e.id]["거래ID"], "event_id": e.id, "at": e.at.isoformat(),
                         "visible_on": e.visible_on.isoformat(), "kind": e.kind, "channel": e.channel,
                         "true_category": e.category, "amount": e.amount, "group": e.group, "ref": e.ref,
                         "installment": e.installment} for e in events],
         },
         "user_sim": {"fixed_answers": fixed, "hidden_facts": p.get("hidden_facts", [])},
-        "rubric": {"problems": p.get("problems", []), "cases": p.get("cases", [])},
+        "rubric": {"problems": p.get("problems", []), "issues": issues, "cases": cases},
     }
 
 
@@ -547,7 +712,7 @@ def _goal(goal: dict | None, d0: dt.date) -> dict | None:
 
 
 def _levers(p, monthly, groups, by_id, history: list[str]) -> dict:
-    """얽힌 문제별 지렛대 크기 (온보딩 기간 기준). 선택지 크기 순서를 채점할 때 쓴다."""
+    """얽힌 문제별 절약 후보 크기 (온보딩 기간 기준). 선택지 크기 순서를 채점할 때 쓴다."""
     out = {}
     for prob in p.get("problems", []):
         lever = prob.get("lever")

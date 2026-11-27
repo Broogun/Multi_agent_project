@@ -30,7 +30,7 @@ def test_every_table_has_rows_matching_columns(rows):
 def test_counts_match_generated_world(rows):
     w, tables = rows
     assert len(tables["demo.transactions"]) == sum(len(b) for b in w.batches.values())
-    assert len(tables["demo.records"]) == len(w.persona["records"])
+    assert len(tables["demo.records"]) == sum(len(day) for day in w.records.values())
     assert len(tables["demo_eval.cases"]) == len(w.persona["cases"])
     assert len(tables["demo_eval.tx_truth"]) == len(w.truth["facts"]["events"])
     keys = [(r[0], r[1]) for r in tables["demo.transactions"]]

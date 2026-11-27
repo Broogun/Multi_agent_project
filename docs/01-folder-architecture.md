@@ -24,6 +24,8 @@ Multi_agent_project/
 │  ├─ 06-search-policy.md    # 검색 API 사용 원칙 (약관·저장·표시)
 │  ├─ 07-onboarding.md       # 팀원 첫날 30분
 │  ├─ 08-demo-data.md        # 데모 데이터 안내 (페르소나·위치·사용 규칙)
+│  ├─ 09-demo-scenario.md    # 시연 시나리오 (대본·필요 기능·리허설)
+│  ├─ 10-llm-eval-plan.md    # LLM 평가 계획 (싱글 에이전트, 쟁점·절약 측정)
 │  ├─ todo/                  # 할 일 (00-todo-list.md + 상세 파일)
 │  ├─ reports/               # 결정·완료 기록 (YYMMDD-HHMM-이니셜-slug.md)
 │  └─ learning/              # 학습 문서 (참고용)
@@ -36,7 +38,7 @@ Multi_agent_project/
 │  ├─ data/                  # B: 사용자 데이터·계산
 │  └─ demo/                  # C: 데모 거래 생성기 (통합 거래내역, personas/*.toml)
 ├─ app/                      # C: 웹 UI
-├─ tests/                    # pytest (가짜 LLM, 네트워크 없음)
+├─ tests/                    # pytest (가짜 LLM, 네트워크 없음. 데모 데이터: test_demo_data·test_demo_live_period·test_demo_publish)
 ├─ eval/                     # B: 평가셋·채점 기록
 ├─ scripts/                  # 일회성·운영 스크립트
 ├─ data/                     # 로컬 데이터 (DB·원본·수동 YAML 모두 git 제외)
