@@ -2,6 +2,7 @@
 
 LLM 하나를 두 가지 방식으로 부른다 (docs/10 §2).
 - 피드백 (온보딩·주간·월간): 도구로 내역을 보고, 필요하면 질문하고, 쟁점·목표 달성도·제안·메시지를 JSON 으로 낸다.
+  온보딩은 보고서(달마다 수입·지출·남는 돈, 카테고리, 패턴)와 목표안도 낸다. 목표는 유저와 대화로 정한다.
 - 유저 이해 (기록, 질문 답, 제안 반응): 도구 없이 유저 정보를 갱신한다. 유저에게 말하지 않는다.
 호출 사이에는 대화 전체가 아니라 요약 상태(memory)만 넘긴다. 1차 기준선(261126)의 입력 토큰 누적을 피하기 위해서다.
 숫자 검증에 걸리면 한 번 고쳐 내게 한다 (하네스 검증기를 쓰므로 멀티 에이전트와 같은 기준).
@@ -30,10 +31,11 @@ COMMON = """너는 목표 지향 소비 관리 앱의 AI 코치다. 유저의 �
 6. 개입할 가치가 없으면 제안하지 않는다."""
 
 FEEDBACK = """지금은 {kind} 시간이다. 도구로 내역을 확인하고, 마지막에 아래 JSON 하나만 답한다 (앞뒤 설명 없이).
-- 온보딩: 3개월 내역을 처음 본다. 패턴을 파악하고, 꼭 필요한 질문을 한 뒤, 쟁점·목표 달성 가능성·제안을 낸다.
+- 온보딩: 3개월 내역을 처음 본다. 아래 '온보딩에서 할 일'을 따른다.
 - 주간: 지난 피드백 이후 바뀐 것을 보고 쟁점 상태를 갱신한다. 새 결제·가격 변화·이름 없는 이체를 확인한다.
 - 월간: 한 달을 정리하고 목표 달성도를 도구 결과로 말한다.
 질문은 ask_user 로 하고, 이번 피드백에서 최대 {max_q}개다. 제안은 최대 3개, 크기 순서로 낸다.
+목표는 온보딩에서 유저가 만든 것이다 (유저 정보의 '목표'). 진척은 goal_progress 로 본다.
 쟁점 유형: {issue_types}
 쟁점 상태: {statuses}
 제안 행동: {actions}.
@@ -49,6 +51,21 @@ JSON:
  "suggestions": [{{"target": "대상", "action": "제안 행동", "per_week": 1, "amount": 30000, "to": "바꿀 것",
                   "deadline": "YYYY-MM-DD", "text": "유저에게 보일 문장"}}],
  "message": "유저에게 보낼 메시지 (숫자는 도구 결과에서만)"}}"""
+
+ONBOARDING = """온보딩에서 할 일 (순서대로). 목표는 고정 답변에 없다. 유저와 정한다.
+1. 3개월 내역으로 달마다 수입·지출·남는 돈(수입 − 지출)을 계산한다. flow_summary·spending_summary 로 합계를 보고,
+   이중 집계를 걸러 calculate 로 계산한다: 카드대금 이체·간편결제 충전은 빼고, 정산 입금·환불은 지출에서 빼고,
+   월세 같은 생활 이체와 현금 인출은 지출에 넣고, 저축 이체는 쓴 돈이 아니라 남는 돈으로 본다. 할부 같은 일회성 큰 결제는 따로 짚는다.
+2. 카테고리별 월평균 소비와 소비 패턴을 정리한다.
+3. 꼭 필요한 것만 묻는다 (확인 질문 + 목표 대화, 합쳐서 최대 {max_q}개). 목표 대화: 무엇을 위해·얼마를·언제까지 모으려는지,
+   그 목표를 바꿀 여지(시점·금액)가 있는지.
+4. 목표안을 만든다: forecast_goal 로 필요 월 저축액을 계산하고, 남는 돈과의 차이(줄여야 할 금액)를 calculate 로 낸다.
+   그 차이를 현실적인 지출 조정으로 채울 수 없으면, 유저가 말한 범위 안에서 시점·금액을 바꾼 목표안을 낸다.
+5. 보고서(report)와 목표안(goal_proposal)을 낸다. 유저가 목표안을 확인하고 고친 뒤 목표 생성 버튼을 누른다.
+온보딩 JSON 에는 위 형식에 아래 두 칸을 더한다 (숫자는 모두 도구 결과):
+ "report": {{"months": [{{"month": "YYYY-MM", "income": 0, "spending": 0, "leftover": 0}}], "monthly_leftover": 0,
+             "categories": [{{"category": "분류", "monthly": 0}}], "patterns": ["소비 패턴"], "required_cut": 0, "summary": "한 줄"}},
+ "goal_proposal": {{"name": "목표 이름", "amount": 0, "deadline": "YYYY-MM-DD", "current_saved": 0, "monthly_required": 0}}"""
 
 UNDERSTAND = """지금은 유저 이해 시간이다. 유저가 방금 한 일(기록, 질문 답, 제안 반응)을 보고 유저 정보를 갱신한다.
 유저에게 말하지 않는다. 도구는 없다. 아래 JSON 하나만 답한다 (앞뒤 설명 없이).
@@ -76,7 +93,7 @@ class SingleAgent:
     def __init__(self, llm: LLM, max_steps: int = 16, max_retries: int = 1):
         self.llm, self.model = llm, llm.model
         self.max_steps, self.max_retries = max_steps, max_retries
-        self.memory: dict = {"fixed_answers": None, "profile": {}, "patterns": [], "questions_for_next": [],
+        self.memory: dict = {"fixed_answers": None, "goal": None, "profile": {}, "patterns": [], "questions_for_next": [],
                              "last_feedback": None, "suggestions": [], "qa": []}
 
     # -------------------------------------------------------------- 호출 방식 2가지
@@ -86,6 +103,8 @@ class SingleAgent:
         system = f"{COMMON}\n\n" + FEEDBACK.format(
             kind=KIND[ctx.kind], max_q=ctx.tools.max_questions, issue_types=", ".join(ISSUE_TYPES),
             statuses=", ".join(STATUSES), actions=", ".join(ACTIONS))
+        if ctx.kind == "onboarding":
+            system += "\n\n" + ONBOARDING.format(max_q=ctx.tools.max_questions)
         day = dt.date.fromisoformat(ctx.today)
         user = (f"[오늘] {ctx.today} ({WEEKDAYS[day.weekday()]}) {KIND[ctx.kind]}. 다음 피드백: {ctx.next_feedback or '없음'}\n"
                 f"[유저 정보 (요약 상태)]\n{self._memory_text()}")
@@ -100,6 +119,8 @@ class SingleAgent:
         if ev["kind"] == "replies":            # 코드가 먼저 기록해 둔다 (LLM 이 놓쳐도 남게)
             if ev.get("fixed_answers"):
                 self.memory["fixed_answers"] = ev["fixed_answers"]
+            if ev.get("goal"):                    # 유저가 목표 생성 버튼으로 만든 목표 (고친 칸 포함)
+                self.memory["goal"] = {**ev["goal"], "edits": ev.get("goal_edits", [])}
             self.memory["qa"] += [{"date": ev["feedback_date"], **q} for q in ev["qa"]]
             self.memory["suggestions"] += [{"date": ev["feedback_date"], **r} for r in ev["reactions"]]
         system = f"{COMMON}\n\n{UNDERSTAND}"
@@ -113,7 +134,7 @@ class SingleAgent:
     # -------------------------------------------------------------- 내부
     def _memory_text(self) -> str:
         m = self.memory
-        view = {"고정 답변": m["fixed_answers"], "유저 정보": m["profile"], "소비 패턴": m["patterns"],
+        view = {"고정 답변": m["fixed_answers"], "목표": m["goal"], "유저 정보": m["profile"], "소비 패턴": m["patterns"],
                 "다음에 물을 질문": m["questions_for_next"], "지난 피드백": m["last_feedback"],
                 "제안과 유저 반응": m["suggestions"][-15:], "질문과 답": m["qa"][-20:]}
         return json.dumps(view, ensure_ascii=False, default=str)

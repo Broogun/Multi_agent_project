@@ -82,6 +82,35 @@ def spending_summary(v: View, start_date=None, end_date=None, group_by="category
                             "분류는 앱 자동 분류라 틀릴 수 있다"], as_of=v.through.isoformat())
 
 
+def flow_summary(v: View, start_date=None, end_date=None) -> ToolResult:
+    """앱 타입(수입·지출·이체)별 달 합계와, 수입·이체 행의 내용별 합계. 앱이 붙인 타입 그대로라 이중 집계가 섞여 있다.
+    남는 돈(수입 − 지출)은 에이전트가 걸러서 계산한다 (docs/10 §5): 카드대금·충전은 빼고, 정산 입금·환불은 지출에서 빼고,
+    생활 이체(월세 등)는 지출, 저축 이체는 남는 돈."""
+    months: dict = defaultdict(lambda: {"수입": 0, "지출": 0, "이체_출금": 0, "이체_입금": 0})
+    by_content: dict = defaultdict(lambda: {"amount": 0, "count": 0, "months": set()})
+    for r in _filter(v.rows, start_date, end_date):
+        m, a = months[r["날짜"][:7]], r["금액"]
+        if r["타입"] == "지출":
+            m["지출"] -= a                                   # 지출은 음수, 환불은 양수 → 순지출(양수)
+        elif r["타입"] == "수입":
+            m["수입"] += a
+        else:
+            m["이체_출금" if a < 0 else "이체_입금"] += abs(a)
+        if r["타입"] != "지출":
+            c = by_content[(r["타입"], r["내용"], "출금" if a < 0 else "입금")]
+            c["amount"], c["count"] = c["amount"] + abs(a), c["count"] + 1
+            c["months"].add(r["날짜"][:7])
+    rows = [{"month": k, **v_} for k, v_ in sorted(months.items())]
+    contents = [{"type": t, "content": n, "direction": d, "amount": c["amount"], "count": c["count"],
+                 "months": sorted(c["months"])}
+                for (t, n, d), c in sorted(by_content.items(), key=lambda kv: -kv[1]["amount"])][:20]
+    calc = {r["month"]: f"수입 {r['수입']:,} / 지출(순) {r['지출']:,} / 이체 출금 {r['이체_출금']:,} / 이체 입금 {r['이체_입금']:,}"
+            for r in rows}
+    return _result({"months": rows, "non_spending_rows": contents}, calc=calc, as_of=v.through.isoformat(),
+                   caveats=["앱 타입 그대로 합친 값이다. 카드대금·간편결제 충전·저축 이체·정산 입금·환불이 섞여 있다",
+                            "남는 돈(수입 − 지출)은 이중 집계를 걸러 calculate 로 계산한다"])
+
+
 def list_transactions(v: View, start_date=None, end_date=None, type=None, category=None, subcategory=None,
                       keyword=None, limit=40) -> ToolResult:
     rows = list(_filter(v.rows, start_date, end_date, type, category, subcategory, keyword))
@@ -191,7 +220,7 @@ def card_bills(v: View) -> ToolResult:
 def goal_progress_tool(v: View) -> ToolResult:
     g = goal_progress(v.persona, v.world.events, v.world.d0, v.through)
     if not g:
-        return _result(None, status="no_data", caveats=["목표가 없다"])
+        return _result(None, status="no_data", caveats=["아직 목표가 없다. 온보딩에서 유저와 정한다 (필요 월 저축액은 forecast_goal)"])
     return _result(g, calc={"progress": g["calc"]}, as_of=v.through.isoformat(),
                    caveats=["끝난 달만 진척에 넣는다. 이번 달은 월급 전후로 흔들려서 this_month 에 따로 보여 준다",
                             "저축 이체는 내 돈의 이동이라 지출이 아니다"])
@@ -237,6 +266,10 @@ SPECS = {
         "description": "기간·조건별 순지출 합계 (지출 행만, 환불 반영, 카드대금·충전·이체 제외). "
                        "group_by: month | category | subcategory | merchant | payment | weekday",
         "parameters": {"type": "object", "properties": {"group_by": {"type": "string"}, **_FILTERS}}},
+    "flow_summary": {
+        "description": "달마다 앱 타입(수입·지출·이체)별 합계와, 수입·이체 행의 내용별 합계. 앱이 붙인 타입 그대로라 "
+                       "카드대금·저축 이체·정산 입금이 섞여 있다 (남는 돈은 걸러서 calculate 로 계산).",
+        "parameters": {"type": "object", "properties": {"start_date": _DATE, "end_date": _DATE}}},
     "list_transactions": {
         "description": "통합 거래내역 행 조회 (금액: 지출·출금 음수, 수입·환불 양수). 최근 limit 건.",
         "parameters": {"type": "object", "properties": {
@@ -251,7 +284,8 @@ SPECS = {
         "description": "신용카드 대금을 전월 사용분(일시불 + 할부 회차 − 취소)과 맞춰 본 계산.",
         "parameters": {"type": "object", "properties": {}}},
     "goal_progress": {
-        "description": "목표 달성도: 현재 저축 + 끝난 달 (수입 − 지출)을 필요 월 저축액 × 끝난 달 수와 비교. 이번 달은 따로.",
+        "description": "목표 달성도: 현재 저축 + 끝난 달 (수입 − 지출)을 필요 월 저축액 × 끝난 달 수와 비교. 이번 달은 따로. "
+                       "목표는 온보딩에서 유저가 만든 것 (온보딩 중에는 아직 없다).",
         "parameters": {"type": "object", "properties": {}}},
     "forecast_goal": {
         "description": "목표 금액·현재 저축·마감(YYYY-MM-DD)으로 남은 개월(이번 달 포함)과 필요 월 저축액 계산.",
@@ -268,7 +302,7 @@ SPECS = {
                        "required": ["target", "question"]}},
 }
 FUNCS: dict[str, Callable[..., ToolResult]] = {
-    "spending_summary": spending_summary, "list_transactions": list_transactions,
+    "spending_summary": spending_summary, "flow_summary": flow_summary, "list_transactions": list_transactions,
     "recurring_payments": recurring_payments, "unnamed_transfers": unnamed_transfers, "card_bills": card_bills,
     "goal_progress": goal_progress_tool, "forecast_goal": forecast_goal, "calculate": calculate,
 }

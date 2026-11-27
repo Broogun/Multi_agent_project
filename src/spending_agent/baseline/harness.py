@@ -6,6 +6,8 @@
 하루 진행 (docs/10 §2, generator.FEEDBACK_HOUR):
   온보딩(D0 0시) → 그날 21시까지 쓴 기록마다 유저 이해 → 21시에 그날 거래가 들어옴 → 피드백 날이면 피드백
   → 21시 뒤에 쓴 기록마다 유저 이해 (다음 피드백에서 다룬다)
+온보딩 (docs/10 §2): 고정 질의(목표 없음) + 3개월 내역 → 질문(최대 5개, 목표 대화 포함) → 보고서(report)와 목표안
+  (goal_proposal) → 유저가 목표안을 확인·수정해 목표 생성 버튼을 누른다(Simulator.create_goal). 그 목표로 세계를 다시 만든다.
 세계 (demo.responses 의 세 세계): 처음에는 ② 앱만(자기 기록 효과)의 거래·기록이 들어온다. 피드백에서 제안이 수락되면
 ③ 앱 + 피드백(responses.with_self)으로 다시 만들고, 다음 날부터 바뀐 거래·기록이 들어온다. 이미 들어온 것은 바뀌지 않는다.
 에이전트 입력에는 truth.json 의 정답·숨은 사실을 넣지 않는다. 숨은 사실은 유저 시뮬레이터가 질문에 답할 때만 쓴다.
@@ -26,7 +28,8 @@ from .simulator import Simulator, strengths
 from .tools import ToolBox, View
 
 DAY = dt.timedelta(days=1)
-MAX_QUESTIONS = 3        # 피드백 한 번에 (docs/10 §5 "주 3개까지")
+MAX_QUESTIONS = 3        # 주간·월간 피드백 한 번에 (docs/10 §5 "주 3개까지")
+MAX_QUESTIONS_ONBOARDING = 5   # 온보딩: 확인 질문 + 목표 대화 (팀 결정 261127)
 MAX_SUGGESTIONS = 3
 
 
@@ -70,6 +73,9 @@ class Run:
     feedbacks: list[dict] = field(default_factory=list)
     accepted: list[dict] = field(default_factory=list)
     rebuilds: int = 0
+    goal: dict | None = None          # 온보딩에서 유저가 만든 목표 {name, amount, deadline, current_saved}
+    goal_source: str | None = None    # agent (목표안으로 만듦) | user (목표안이 없어 유저가 직접 넣음)
+    goal_edits: list[dict] = field(default_factory=list)   # 유저가 목표안에서 고친 칸
 
 
 def user_numbers(texts: list[str]) -> ToolResult:
@@ -77,8 +83,31 @@ def user_numbers(texts: list[str]) -> ToolResult:
     return {"status": "ok", "value": {"user_and_schedule": texts}, "calc": {}, "sources": [], "as_of": None, "caveats": []}
 
 
+def _ints(x) -> list[int]:
+    """보고서·목표안 안의 숫자 칸 (날짜·월 같은 글자는 빼고 숫자만)."""
+    if isinstance(x, bool):
+        return []
+    if isinstance(x, (int, float)):
+        return [int(x)] if float(x).is_integer() else []
+    if isinstance(x, dict):
+        return [n for v in x.values() for n in _ints(v)]
+    if isinstance(x, list):
+        return [n for v in x for n in _ints(v)]
+    return []
+
+
+def report_texts(out: dict) -> list[str]:
+    """온보딩 보고서·목표안의 문장과 숫자도 숫자 검증에 넣는다 (화면에 그대로 보이므로)."""
+    rep, goal = out.get("report"), out.get("goal_proposal")
+    texts = [" ".join(f"{n:,}" for n in _ints(rep) + _ints(goal))]
+    if isinstance(rep, dict):
+        texts += [str(rep.get("summary", ""))] + [str(p) for p in rep.get("patterns", []) if isinstance(p, str)]
+    return [t for t in texts if t]
+
+
 def verify_feedback(out: dict, results: list[ToolResult]) -> Validation:
-    texts = [str(out.get("message", ""))] + [str(s.get("text", "")) for s in out.get("suggestions", [])]
+    texts = ([str(out.get("message", ""))] + [str(s.get("text", "")) for s in out.get("suggestions", [])]
+             + report_texts(out))
     own = []          # 에이전트가 고른 제안 강도(주 n회·금액·새 마감일)는 사실이 아니라 선택이라 허용한다
     for s in out.get("suggestions", []):
         st = strengths(s) if isinstance(s, dict) else {}
@@ -96,6 +125,10 @@ def _normalize(out: dict) -> tuple[dict, list[str]]:
         if not isinstance(out[k], list):
             notes.append(f"{k} 형식 오류")
             out[k] = []
+    for k in ("report", "goal_proposal"):
+        if k in out and not isinstance(out[k], dict):
+            notes.append(f"{k} 형식 오류")
+            out[k] = None
     if len(out["suggestions"]) > MAX_SUGGESTIONS:
         notes.append(f"제안 {len(out['suggestions'])}개 → {MAX_SUGGESTIONS}개만 받음")
         out["suggestions"] = out["suggestions"][:MAX_SUGGESTIONS]
@@ -112,8 +145,11 @@ def _same_past(old: World, new: World, delivered: set[str], through: dt.date) ->
             raise RuntimeError(f"서비스 있음 세계를 다시 만들었더니 이미 쓴 {d} 기록이 바뀌었다")
 
 
-def served_world(p: dict, scale: float, accepted: list[dict]) -> World:
-    """에이전트가 실제로 본 세계: 수락이 없으면 ② 앱만, 있으면 ③ 앱 + 피드백. 채점(score.py)도 이 세계로 한다."""
+def served_world(p: dict, scale: float, accepted: list[dict], goal=responses.KEEP) -> World:
+    """에이전트가 실제로 본 세계: 수락이 없으면 ② 앱만, 있으면 ③ 앱 + 피드백. 채점(score.py)도 이 세계로 한다.
+    goal: 온보딩에서 유저가 만든 목표 (None = 아직 없음). KEEP 이면 페르소나 그대로 (목표가 없던 예전 실행 기록)."""
+    if goal is not responses.KEEP:
+        p = responses.with_goal(p, goal)
     return build_world(responses.with_self(p, scale, [dict(a, day=dt.date.fromisoformat(a["day"])) for a in accepted])[0])
 
 
@@ -121,7 +157,7 @@ def run(pid: str, agent: Agent, until: dt.date | None = None,
         self_scale: float = responses.SELF_SCALES["중간"]) -> Run:
     p = load_persona(pid)
     sim = Simulator(p, build_world(p).truth["user_sim"])
-    w = served_world(p, self_scale, [])             # ② 앱만
+    w = served_world(p, self_scale, [], goal=None)  # ② 앱만, 목표는 온보딩에서 만든다
     kinds = {pt["date"]: pt["kind"] for pt in w.feedback}
     dates = sorted(kinds)
     last = min(until or w.end - DAY, w.end - DAY)
@@ -143,7 +179,8 @@ def run(pid: str, agent: Agent, until: dt.date | None = None,
     def feedback(day: dt.date, kind: str, through: dt.date) -> None:
         nonlocal w
         today = day.isoformat()
-        box = ToolBox(View(p, w, list(visible), through, day), ask=sim.answer, max_questions=MAX_QUESTIONS)
+        box = ToolBox(View(w.persona, w, list(visible), through, day), ask=sim.answer,
+                      max_questions=MAX_QUESTIONS_ONBOARDING if kind == "onboarding" else MAX_QUESTIONS)
         checks: list[Validation] = []
         fixed = sim.fixed_answers() if kind == "onboarding" else None
         if fixed:
@@ -165,13 +202,16 @@ def run(pid: str, agent: Agent, until: dt.date | None = None,
         reactions = [{"suggestion": s, **sim.react(s, day)} for s in out["suggestions"]]
         new = [{"response": r["response"], "day": today, **{k: r[k] for k in responses.STRENGTHS if k in r}}
                for r in reactions if r["decision"] == "수락"]
+        made = sim.create_goal(out.get("goal_proposal")) if kind == "onboarding" else None
         rec.feedbacks.append({"date": today, "kind": kind, "output": out, "notes": notes, "tools": box.log,
                               "questions": box.questions, "validation_first": checks[0], "validation_final": final,
-                              "reactions": reactions, "accepted": new})
+                              "reactions": reactions, "accepted": new, **({"goal_created": made} if made else {})})
         rec.calls[-1]["output"] = out
-        if new:                                     # ③ 앱 + 피드백으로 다시 만든다
+        if made:                                    # 목표 생성 버튼: 유저가 확인·수정한 목표로 세계를 다시 만든다
+            rec.goal, rec.goal_source, rec.goal_edits = made["goal"], made["source"], made["edits"]
+        if new or made:                             # ③ 앱 + 피드백 (+ 만든 목표)으로 다시 만든다
             rec.accepted += new
-            w2 = served_world(p, self_scale, rec.accepted)
+            w2 = served_world(p, self_scale, rec.accepted, goal=rec.goal)
             _same_past(w, w2, delivered, day)
             w, rec.rebuilds = w2, rec.rebuilds + 1
         event = {"kind": "replies", "feedback_date": today,
@@ -180,6 +220,8 @@ def run(pid: str, agent: Agent, until: dt.date | None = None,
                                 "decision": r["decision"]} for r in reactions]}
         if fixed:
             event["fixed_answers"] = fixed
+        if made:                                    # 유저가 만든 목표 (목표안에서 고친 칸 포함)
+            event |= {"goal": made["goal"], "goal_edits": made["edits"], "goal_source": made["source"]}
         if event["qa"] or event["reactions"] or fixed:
             understand(at, event, f"replies-{today}")
 

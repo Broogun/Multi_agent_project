@@ -118,16 +118,30 @@ def _understand_reply():
     return Step(text=json.dumps({"profile_updates": [], "patterns": [], "questions_for_next": []}))
 
 
+P1_GOAL = {"name": "일본 여행 (2주)", "amount": 2100000, "deadline": "2027-04-30", "current_saved": 800000}
+
+
 def good_policy(system, transcript, tools):
-    """도구로 근거를 찾고, 숨은 사실을 겨냥해 묻고, 보호 지출을 피해 제안하고, 숫자는 도구 결과만 쓴다."""
+    """도구로 근거를 찾고, 숨은 사실을 겨냥해 묻고, 보호 지출을 피해 제안하고, 숫자는 도구 결과만 쓴다.
+    온보딩: 목표를 묻고(G1), 남는 돈·필요 월 저축액·줄여야 할 금액을 도구로 계산해 보고서와 목표안을 낸다."""
     if not tools:
         return _understand_reply()
     outs = tool_outputs(transcript)
+    onboarding = "지금은 온보딩" in system
     if not outs:
         return Step(calls=[ToolCall("1", "recurring_payments", {}), ToolCall("2", "goal_progress", {}),
                            ToolCall("3", "list_transactions", {"subcategory": "배달", "limit": 5})])
-    if len(outs) == 3 and "지금은 온보딩" in system:
+    if onboarding and len(outs) == 3:
         return Step(calls=[ToolCall("4", "ask_user", {"target": "무비온", "question": "무비온은 요즘도 보세요?"})])
+    if onboarding and len(outs) == 4:
+        return Step(calls=[ToolCall("5", "ask_user", {"target": "목표", "question": "어떤 목표로 언제까지 얼마를 모으고 싶으세요?"})])
+    if onboarding and len(outs) == 5:            # 9~11월 (수입 − 지출) 평균은 걸러 낸 달별 값으로 계산했다고 본다
+        return Step(calls=[ToolCall("6", "forecast_goal", {"goal_amount": 2100000, "current_saved": 800000,
+                                                           "deadline": "2027-04-30"}),
+                           ToolCall("7", "calculate", {"expression": "(353500 + 145400 + 180800) // 3"})])
+    if onboarding and len(outs) == 7:
+        need, left = outs[5]["value"]["monthly_required"], outs[6]["value"]["result"]
+        return Step(calls=[ToolCall("8", "calculate", {"expression": f"{need} - {left}"})])
     rec, goal, delivery = outs[0]["value"], outs[1]["value"], outs[2]["value"]
     subs = [c["tx"] for x in rec["recurring"] if x["merchant"] in ("무비온", "소리랑 뮤직") for c in x["charges"]]
     issues = [{"type": "정기결제 중복", "target": "구독", "status": "그대로", "evidence": subs, "summary": ""},
@@ -136,6 +150,14 @@ def good_policy(system, transcript, tools):
               {"type": "목표 진척", "target": "여행 적금", "status": "그대로", "evidence": [], "summary": ""}]
     sug = [{"target": "무비온", "action": "해지", "text": "무비온은 해지를 생각해 볼 만해요."},
            {"target": "주말 배달", "action": "줄이기", "per_week": 1, "text": "토요일 배달을 주 1회만 줄여 볼까요?"}]
+    if onboarding:
+        need, left, cut = outs[5]["value"]["monthly_required"], outs[6]["value"]["result"], outs[7]["value"]["result"]
+        report = {"months": [], "monthly_leftover": left, "categories": [], "patterns": ["주말 저녁 배달이 잦다"],
+                  "required_cut": cut, "summary": "구독 정리와 주말 배달 조정을 함께 봐야 해요"}
+        return Step(text=json.dumps({"issues": issues, "goal": {"on_track": None, "summary": ""}, "suggestions": sug,
+                                     "report": report, "goal_proposal": P1_GOAL | {"monthly_required": need},
+                                     "message": f"여행까지 매달 {need:,}원이 필요하고, 지금보다 {cut:,}원을 더 남겨야 해요."},
+                                    ensure_ascii=False))
     return Step(text=json.dumps({"issues": issues, "goal": {"on_track": goal["on_track"], "summary": ""},
                                  "suggestions": sug, "message": f"지금까지 모은 돈은 {goal['progress']:,}원이에요."},
                                 ensure_ascii=False))
@@ -242,8 +264,12 @@ def test_good_agent_scores_higher_than_bad():
     assert good["issues"]["recall"] > bad["issues"]["recall"] == 0
     assert good["numbers"]["final_ok"] == good["numbers"]["feedbacks"] and bad["numbers"]["final_ok"] == 0
     assert good["suggestions"]["protected_violations"] == 0 < bad["suggestions"]["protected_violations"]
-    assert good["questions"]["facts"] == ["H2"]
+    assert good["questions"]["facts"] == ["G1", "H2"]
     assert good["saving"]["expected_feedback_effect"] > bad["saving"]["expected_feedback_effect"] == 0
+    assert good["report"]["ok"] and not bad["report"]["given"]
+    assert good["goal"]["proposed"] and good["goal"]["source"] == "agent" and good["goal"]["asked"] == ["goal"]
+    assert bad["goal"]["source"] == "user"                     # 목표안이 없으면 유저가 원하는 목표를 직접 넣는다
+    assert good["achievement"]["gap_closed_ratio"] > bad["achievement"]["gap_closed_ratio"] == 0
 
 
 def test_cli_dry_run_and_rescore(tmp_path, monkeypatch, capsys):
@@ -276,3 +302,105 @@ def test_openai_adapter_round_trip():
     assert items[1:3] == st.native and items[3] == {"type": "function_call_output", "call_id": "c1", "output": "{}"}
     llm.step("sys", transcript, [])
     assert "tools" not in sent[1]                                # 유저 이해 호출은 도구 없이
+
+
+# ------------------------------------------------------------------ 온보딩 목표 대화 · 목표 생성 버튼 (261127)
+@pytest.mark.parametrize("pid", ["P1", "P2", "P3", "P4", "P5"])
+def test_goal_questions_reach_goal_facts(pid):
+    """목표(무엇·얼마·언제) 질문은 about = goal, 바꿀 여지 질문은 about = goal_flex 사실로 간다."""
+    p = load_persona(pid)
+    sim = Simulator(p, build_world(p).truth["user_sim"])
+    about = {h["id"]: h.get("about") for h in p["hidden_facts"]}
+    for target, q in [("목표", "어떤 목표로 돈을 모으고 싶으세요?"), ("목표", "목표 금액과 기한이 어떻게 되세요?"),
+                      ("목표", "목표가 뭐예요?")]:
+        assert about.get(sim.answer(target, q)["fact"]) == "goal", q
+    for target, q in [("목표 시점", "목표 시점을 조금 미룰 수 있을까요?"), ("목표", "목표를 바꿀 수 있나요?"),
+                      ("목표 금액", "목표 금액을 낮춰도 괜찮을까요?")]:
+        assert about.get(sim.answer(target, q)["fact"]) == "goal_flex", q
+
+
+def _sim(pid):
+    p = load_persona(pid)
+    return Simulator(p, build_world(p).truth["user_sim"])
+
+
+def test_create_goal_keeps_in_range_and_fixes_the_rest():
+    s1 = _sim("P1")
+    ok = s1.create_goal(P1_GOAL)
+    assert ok == {"goal": P1_GOAL, "edits": [], "source": "agent"}
+    late = s1.create_goal(P1_GOAL | {"deadline": "2027-06-30", "amount": 1500000, "current_saved": 0})
+    assert late["goal"] == P1_GOAL and [e["field"] for e in late["edits"]] == ["amount", "deadline", "current_saved"]
+    assert s1.create_goal(None) == {"goal": P1_GOAL, "source": "user",
+                                    "edits": [{"field": "*", "from": None, "to": None, "why": "목표안이 없거나 형식이 틀림"}]}
+    assert s1.create_goal(P1_GOAL | {"deadline": "4월 말"})["source"] == "user"
+    p3 = _sim("P3").create_goal({"name": "전세", "amount": 30000000, "deadline": "2028-06-30", "current_saved": 18000000})
+    assert p3["edits"] == [] and p3["goal"]["deadline"] == "2028-06-30"          # G2: 2028년 안이면 된다
+    assert _sim("P3").create_goal({"amount": 25000000, "deadline": "2029-12-31", "current_saved": 18000000})["goal"] \
+        == {"name": "전세 보증금", "amount": 30000000, "deadline": "2028-12-31", "current_saved": 18000000}
+    used = _sim("P4").create_goal({"name": "중고 노트북", "amount": 1100000, "deadline": "2027-03-15", "current_saved": 800000})
+    assert used["edits"] == []                                                    # H8: 중고도 괜찮다, 3월 중순까지
+    p5 = _sim("P5").create_goal({"name": "비상금", "amount": 2000000, "deadline": "2027-12-31", "current_saved": 400000})
+    assert p5["goal"]["amount"] == 3000000 and [e["field"] for e in p5["edits"]] == ["amount"]   # H7: 300만 원은 지킨다
+
+
+def test_onboarding_allows_five_questions_and_rebuilds_with_created_goal():
+    seen = {}
+
+    def policy(system, transcript, tools):
+        if not tools:
+            seen.setdefault("understand", []).append(transcript[0]["text"])
+            return _understand_reply()
+        outs = tool_outputs(transcript)
+        if "지금은 온보딩" in system and len(outs) < 6:
+            return Step(calls=[ToolCall(str(len(outs)), "ask_user", {"target": "목표", "question": f"목표가 뭐예요? {len(outs)}"})])
+        if "지금은 온보딩" in system and len(outs) == 6:
+            return Step(calls=[ToolCall("g", "goal_progress", {}), ToolCall("f", "forecast_goal", {
+                "goal_amount": 2100000, "current_saved": 800000, "deadline": "2027-04-30"})])
+        if "지금은 온보딩" in system:
+            seen["onboarding_goal"] = outs[6]
+            return Step(text=json.dumps({"issues": [], "suggestions": [], "message": "목표를 만들어 볼게요.",
+                                         "goal_proposal": P1_GOAL | {"monthly_required": outs[7]["value"]["monthly_required"]}},
+                                        ensure_ascii=False))
+        if not outs:
+            return Step(calls=[ToolCall("w", "goal_progress", {})])
+        seen["weekly_goal"] = outs[0]
+        return Step(text=json.dumps({"issues": [], "suggestions": [], "message": "확인했어요."}, ensure_ascii=False))
+
+    rec = dataclasses.asdict(run("P1", SingleAgent(ScriptedLLM(policy)), D(2026, 12, 6)))
+    onb = rec["feedbacks"][0]
+    assert [o["ok"] for o in (t["output"] for t in onb["tools"] if t["name"] == "ask_user")] == [True] * 5 + [False]
+    assert seen["onboarding_goal"]["status"] == "no_data"                 # 온보딩 중에는 아직 목표가 없다
+    assert rec["goal"] == P1_GOAL and rec["goal_source"] == "agent" and onb["goal_created"]["edits"] == []
+    assert seen["weekly_goal"]["value"]["monthly_required"] == 260000     # 만든 목표로 진척을 본다
+    assert any('"goal": {"name": "일본 여행 (2주)"' in t for t in seen["understand"])   # 유저 이해에 만든 목표가 간다
+
+
+def test_verify_feedback_checks_report_and_goal_numbers():
+    out = {"message": "", "suggestions": [], "report": {"monthly_leftover": 226566, "months": [{"month": "2026-09",
+           "leftover": 353500}], "summary": "남는 돈은 월 226,566원"}, "goal_proposal": {"amount": 2100000}}
+    ok = [user_numbers(["226566 353500 2,100,000"])]
+    assert verify_feedback(out, ok)["ok"]                                  # 2026-09 같은 월 이름은 검사하지 않는다
+    assert verify_feedback(out | {"report": {"monthly_leftover": 300000}}, ok)["bad"] == ["300000"]
+
+
+def test_score_report_picks_closer_basis():
+    from spending_agent.baseline.score import score_report
+    p5 = build_world(load_persona("P5")).truth
+    fb = {"output": {"report": {"monthly_leftover": -10000}}}
+    r = score_report(fb, p5)                         # 노트북 할부를 달마다 나눈 기준(−13,200)이 더 가깝다
+    assert r["basis"] == "spread" and r["ok"] and r["truth"] == p5["facts"]["cashflow"]["spread"]["avg_net"]
+    assert not score_report({"output": {"report": {"monthly_leftover": 600000}}}, p5)["ok"]
+    assert score_report({"output": {}}, p5) == {"given": False, "ok": False, "truth": p5["facts"]["cashflow"]["avg_net"]}
+
+
+def test_flow_summary_keeps_app_types(p1):
+    from spending_agent.baseline.tools import flow_summary
+    p, w = p1
+    out = flow_summary(_view(p, w, D(2026, 11, 30)), "2026-09-01", "2026-11-30")["value"]
+    assert [m["month"] for m in out["months"]] == ["2026-09", "2026-10", "2026-11"]
+    contents = {r["content"] for r in out["non_spending_rows"]}
+    assert "데모카드 신용 결제대금" in contents and "출금" in contents      # 카드대금·이름 없는 이체가 섞여 있다
+    sep = out["months"][0]
+    rows = [r for r in w.batches["onboarding"] if r["날짜"].startswith("2026-09")]
+    assert sep["수입"] == sum(r["금액"] for r in rows if r["타입"] == "수입")
+    assert sep["지출"] == -sum(r["금액"] for r in rows if r["타입"] == "지출")
