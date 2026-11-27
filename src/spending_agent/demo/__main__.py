@@ -37,9 +37,11 @@ def _write_day(w: World, root: Path, day: str) -> dict:
     return {"transactions": len(rows), "records": len(records)}
 
 
-def _summary(day: str, counts: dict) -> str:
-    action = "분석 시작" if counts["records"] else "분석 없음 (기록 없음)"
-    return f"{day}  새 거래 {counts['transactions']}건 | 기록 {counts['records']}건 → {action}"
+def _summary(day: str, counts: dict, kind: str | None) -> str:
+    """운영 하루: 거래는 쌓기만, 기록(유저 이벤트)이 있으면 유저 이해, 피드백 날이면 저녁에 피드백 (docs/10 §2)."""
+    action = "유저 이해" if counts["records"] else "기록 없음"
+    evening = {"weekly": " | 저녁: 주간 피드백", "monthly": " | 저녁: 월간 피드백"}.get(kind, "")
+    return f"{day}  새 거래 {counts['transactions']}건 | 기록 {counts['records']}건 → {action}{evening}"
 
 
 def build(pid: str, through: dt.date | None, out_root: Path = OUT) -> Path:
@@ -53,7 +55,7 @@ def build(pid: str, through: dt.date | None, out_root: Path = OUT) -> Path:
     manifest = {"persona": pid, "format": FORMAT, "d0": w.d0.isoformat(),
                 "onboarding": {"from": w.start.isoformat(), "to": last.isoformat(),
                                "transactions": len(w.batches["onboarding"])},
-                "live_end": (w.end - dt.timedelta(days=1)).isoformat(), "days": {}}
+                "live_end": (w.end - dt.timedelta(days=1)).isoformat(), "feedback": w.feedback, "days": {}}
     print(f"{pid} 온보딩 {w.start} ~ {last}: 거래 {len(w.batches['onboarding'])}건")
     _dump(root / "manifest.json", manifest | {"built_through": last.isoformat()})
     if through:
@@ -66,6 +68,7 @@ def advance(pid: str, days: int = 1, out_root: Path = OUT, w: World | None = Non
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     w = w or build_world(load_persona(pid))
     last = dt.date.fromisoformat(manifest["built_through"])
+    kinds = {pt["date"]: pt["kind"] for pt in w.feedback}
     written = []
     for _ in range(days):
         day = last + dt.timedelta(days=1)
@@ -74,7 +77,7 @@ def advance(pid: str, days: int = 1, out_root: Path = OUT, w: World | None = Non
             break
         counts = _write_day(w, root, day.isoformat())
         manifest["days"][day.isoformat()] = counts
-        print(_summary(day.isoformat(), counts))
+        print(_summary(day.isoformat(), counts, kinds.get(day.isoformat())))
         written.append(day.isoformat())
         last = day
     _dump(root / "manifest.json", manifest | {"built_through": last.isoformat()})

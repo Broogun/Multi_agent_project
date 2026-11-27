@@ -13,4 +13,5 @@
 | 대기 | 평가 시나리오 10개 + 채점 스크립트 | B parky2won | [eval-scenarios](eval-scenarios.md) |
 | 대기 | 웹 UI: 채팅 + 검색 창 + 가격 입력 | C KIM-YUNHO | [web-ui](web-ui.md) |
 | 진행 | 데모 사용자 거래 데이터 5명 (P1~P5 초안, 팀 확인 대기) | C KIM-YUNHO | [demo-data](demo-data.md) |
-| 대기 | 시연 시나리오 문서 | C KIM-YUNHO | |
+| 진행 | 시연 시나리오 문서 (초안, 기능 붙는 대로 리허설) | C KIM-YUNHO | [09](../09-demo-scenario.md) |
+| 진행 | LLM 평가 하네스 (싱글 에이전트, 쟁점·절약 측정) — 단계 1 데이터 보강 완료, 담당 미정 | C KIM-YUNHO (임시) | [10](../10-llm-eval-plan.md) |

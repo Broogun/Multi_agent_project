@@ -209,7 +209,7 @@ def test_p3_taxi_annual_charge_and_pt_installment():
     taxis = [r for r in _all_rows(w) if r["내용"] == "모두택시"]
     assert taxis and all(r["시간"] >= "22:00" for r in taxis)
     assert not _rows_of("P3", "구름드라이브", "onboarding") and _rows_of("P3", "구름드라이브")   # 연간 결제 첫 등장
-    assert [i["months"] for i in w.truth["facts"]["installments"]] == [3]
+    assert [i["months"] for i in w.truth["facts"]["installments"]] == [3, 3]                # 10월 PT, 1월 재등록
     nov_bill = next(b for b in w.truth["facts"]["card_bills"] if b["month"] == "2026-11")
     assert nov_bill["installments"] == 550000 - 550000 // 3 * 2                          # PT 1회차
     f = w.truth["facts"]
@@ -252,7 +252,7 @@ def test_p5_payday_shopping_returns_and_zombie_subscription():
     after_payday = [e for e in buys if e.at.day >= 25 or e.at.day <= 3]
     assert len(after_payday) >= 0.6 * len(buys)                                        # 월급 직후 몰림
     assert sum(e.kind == "cancel" for e in hist) >= 3                                    # 잦은 반품
-    assert {r["날짜"][:7] for r in _rows_of("P5", "무비온")} == {"2026-09", "2026-10", "2026-11", "2026-12"}
+    assert {r["날짜"][:7] for r in _rows_of("P5", "무비온")} == {"2026-09", "2026-10", "2026-11", "2026-12", "2027-01"}
     assert [i["months"] for i in w.truth["facts"]["installments"]] == [12]
     f = w.truth["facts"]
     spend = {k: v["monthly_size"] for k, v in f["levers"].items() if v["side"] == "지출"}
@@ -273,4 +273,5 @@ def test_cli_build_then_advance(tmp_path, capsys):
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["built_through"] == "2026-12-02"
     assert advance("P4", 1, out_root=tmp_path) == ["2026-12-03"]
-    assert "분석" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "유저 이해" in out and "기록 없음" in out

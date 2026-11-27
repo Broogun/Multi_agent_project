@@ -7,6 +7,9 @@
 # 제약: 집에서는 공부가 안 된다, 캡슐머신이 없고 드립은 귀찮다, 게임은 본인이 정한 월 상한이 있다.
 # 함정: 시험기간 일시 급증을 추세로 보는 것, 이름 없는 용돈·알바 입금.
 #
+# 기간 중 (12/15~1/31, docs/10 §8): 12/19 방학 시작(카페·교통·학식 감소 = 제안 효과 아님, PC방·모임 증가),
+# 12월 말 게임 이벤트로 본인 상한 초과, 1/7 여행 예약 결제(목표를 위해 쓴 돈). 12/14까지는 처음 만든 그대로다.
+#
 # 입력 경로 B 가정. 가맹점·기관·앱 이름과 금액은 모두 가상의 데모 값이다.
 
 id = "P2"
@@ -14,7 +17,7 @@ user_id = "demo_P2"
 seed = 27                # 1~40 중 카페 증가(9월→11월)·시험기간 급증·여유 감소가 함께 보이는 표본
 d0 = 2026-12-01
 history_months = 3
-live_days = 14
+live_days = 62           # 운영: 12/1 ~ 1/31 (처음 2주는 시연용 원래 데이터, 이후는 평가용 추가)
 
 [profile]
 gender = "남"
@@ -55,6 +58,7 @@ music = { name = "소리랑 뮤직", card_name = "소리랑", app_category = ["�
 book = { name = "한누리문고", card_name = "한누리문고", app_category = ["교육", "도서"] }
 shop_online = { name = "옷장마켓", card_name = "옷장마켓", app_category = ["쇼핑", "의류"] }
 pub = { name = "청춘포차 신촌점", card_name = "청춘포차신촌", app_category = ["식비", "술집"] }
+trip = { name = "하늘길투어", card_name = "하늘길투어", app_category = ["여행", "숙박·교통"] }
 delivery = { name = "한끼배달", card_name = "한끼배달", app_category = ["식비", "배달"] }
 
 # ---------------------------------------------------------------- 매달
@@ -94,6 +98,7 @@ channel = "card"
 prob = [0.9, 0.9, 0.9, 0.9, 0.8, 0.3, 0.2]
 amount = [3300, 3300]
 hours = [8, 10]
+boosts = [{ from = 2026-12-19, until = 2027-02-28, factor = 0.35 }]   # 방학: 학교에 안 감 (H6)
 
 [[habits]]
 id = "lunch"
@@ -103,6 +108,7 @@ channel = "card"
 prob = [0.7, 0.7, 0.7, 0.7, 0.6, 0.1, 0.0]
 amount = [4500, 7500]
 hours = [11, 14]
+boosts = [{ from = 2026-12-19, until = 2027-02-28, factor = 0.15 }]   # 방학: 집에서 먹음
 
 [[habits]]
 id = "cafe"              # 11월부터 시험 없이도 늘었고, 시험기간에는 크게 는다 (H1, H2)
@@ -116,6 +122,7 @@ boosts = [
   { from = 2026-11-01, until = 2026-12-31, factor = 1.9 },   # 시험 없이도 증가
   { from = 2026-10-19, until = 2026-10-30, factor = 2.6 },   # 중간고사
   { from = 2026-12-07, until = 2026-12-18, factor = 1.8 },   # 기말고사
+  { from = 2026-12-19, until = 2027-02-28, factor = 0.5 },   # 방학: 공부할 곳이 덜 필요 (H6)
 ]
 
 [[habits]]
@@ -136,6 +143,7 @@ channel = "card"
 prob = [0.05, 0.05, 0.05, 0.05, 0.3, 0.3, 0.1]
 amount = [3000, 9000]
 hours = [18, 24]
+boosts = [{ from = 2026-12-19, until = 2027-02-28, factor = 2.2 }]    # 방학: 친구들과 PC방 (H6)
 
 [[habits]]
 id = "delivery"
@@ -154,6 +162,7 @@ channel = "card"
 prob = [0.0, 0.0, 0.05, 0.1, 0.35, 0.3, 0.0]
 amount = [15000, 35000]
 hours = [19, 24]
+boosts = [{ from = 2026-12-19, until = 2027-02-28, factor = 1.5 }]    # 방학: 모임 증가
 
 # ---------------------------------------------------------------- 비정기
 [[irregular]]
@@ -212,6 +221,42 @@ merchant = "game"
 amount = 5500
 category = "게임"
 
+[[events]]               # 기간 중: 겨울 이벤트 게임 결제 (H8)
+id = "S_game_1224"
+at = 2026-12-24T21:10:00
+kind = "purchase"
+channel = "easypay_card"
+merchant = "game"
+amount = 11000
+category = "게임"
+
+[[events]]
+id = "S_game_1227"
+at = 2026-12-27T20:40:00
+kind = "purchase"
+channel = "easypay_card"
+merchant = "game"
+amount = 8800
+category = "게임"
+
+[[events]]
+id = "S_game_1230"
+at = 2026-12-30T23:05:00
+kind = "purchase"
+channel = "easypay_card"
+merchant = "game"
+amount = 5500
+category = "게임"
+
+[[events]]               # 기간 중: 2월 여행 숙소·기차 예약 (목표를 위해 쓴 돈, H7, R6)
+id = "S_trip_0107"
+at = 2027-01-07T20:30:00
+kind = "purchase"
+channel = "easypay_card"
+merchant = "trip"
+amount = 280000
+category = "여행"
+
 # ---------------------------------------------------------------- 온보딩: 기초 고정 질의 답변
 [onboarding.fixed_answers]
 goal = { name = "겨울방학 여행", amount = 700000, deadline = 2027-02-15, current_saved = 250000 }
@@ -219,6 +264,9 @@ income = "용돈이랑 학원 채점 알바요"
 housing = "본가 살아요"
 protected = ["시험기간 공부할 곳"]
 concern = "카페값이 너무 많이 나가는 것 같아요"
+
+[goal_tracking]          # 목표 달성도 계산: 이 용도의 결제는 낭비가 아니라 목표에 쓴 돈이다 (generator.goal_progress)
+goal_categories = ["여행"]
 
 # ---------------------------------------------------------------- 숨은 사실
 [[hidden_facts]]
@@ -250,6 +298,24 @@ id = "H5"
 topic = "1일 25만 원, 5일 32만 원 입금"
 fact = "1일 25만 원은 부모님 용돈, 5일 32만 원은 학원 채점 알바비."
 answer = "1일은 용돈이고 5일은 채점 알바비예요."
+
+[[hidden_facts]]
+id = "H6"
+topic = "12/19 이후 카페·교통·학식 감소, PC방·모임 증가"
+fact = "12/18에 기말이 끝나고 방학이다. 학교에 안 가서 카페·교통·학식은 줄고, 친구들과 PC방·모임이 많아진다."
+answer = "방학이라 학교를 안 가요. 대신 친구들이랑 PC방을 자주 가요."
+
+[[hidden_facts]]
+id = "H7"
+topic = "1/7 하늘길투어 280,000원"
+fact = "2월 여행 숙소와 기차표를 예약했다. 여행비로 모으던 돈에서 낸 것이다."
+answer = "2월 여행 숙소랑 기차표 예약한 거예요."
+
+[[hidden_facts]]
+id = "H8"
+topic = "12월 말 게임 결제가 잦음"
+fact = "겨울 이벤트라 평소보다 많이 질렀다. 3만 원 상한을 넘긴 줄은 몰랐다."
+answer = "겨울 이벤트라 좀 질렀어요... 3만 원 넘었어요?"
 
 # ---------------------------------------------------------------- 얽힌 문제
 [[problems]]
@@ -291,29 +357,105 @@ title = "용돈·알바 받는 날 여유분을 여행비로 먼저 떼어 두�
 facts = ["H5"]
 note = "월 여유(수입 − 지출) 평균은 필요 월 저축액에 못 미친다. 모자란 만큼만 지출 지렛대로 채운다"
 
+# ---------------------------------------------------------------- 기간 중 쟁점 (형식은 P1.toml 참고)
+[[issues]]
+id = "vacation"
+type = "일시적 변화"
+side = "지출"
+title = "12/19 방학: 카페·교통·학식 감소, PC방·모임 증가 (카페 감소는 제안 효과가 아님)"
+from = 2026-12-19
+detect_by = 2026-12-27
+facts = ["H6"]
+
+[[issues]]
+id = "game_over_cap"
+type = "습관 지출 증가"
+side = "지출"
+title = "12월 말 게임 이벤트 결제로 본인 상한(월 3만 원) 초과"
+from = 2026-12-24
+detect_by = 2026-12-31
+until = 2026-12-31       # 1월에는 이벤트가 끝나 원래 수준으로 돌아간다
+facts = ["H3", "H8"]
+evidence = ["S_game_1224", "S_game_1227", "S_game_1230"]
+
+[[issues]]
+id = "trip_booking"
+type = "일회성 큰 지출"
+side = "목표"
+title = "1/7 여행 예약 결제 (목표를 위해 쓴 돈)"
+from = 2027-01-07
+detect_by = 2027-01-10
+facts = ["H7"]
+evidence = ["S_trip_0107"]
+
 # ---------------------------------------------------------------- 운영: 유저 기록
 [[records]]
 id = "R1"
 written_at = 2026-12-03T21:00:00
 about = "S_cafe_1202"
 text = "오늘도 카페. 한 달에 얼마나 쓰는지 모르겠다"
+learn = ["카페 월 지출을 모른다"]   # 유저 이해가 이 기록에서 남겨야 할 것 (채점용, 출력 안 됨)
 
 [[records]]
 id = "R2"
 written_at = 2026-12-10T09:00:00
 about = "S_cafe_1209"
 text = "시험기간이라 카페에서 공부함"
+learn = ["시험기간에는 카페를 공부 장소로 쓴다"]
 
 [[records]]
 id = "R3"
 written_at = 2026-12-12T10:00:00
 about = "S_game_1210"
 text = "이번 주 게임에 또 질렀다"
+learn = ["게임 결제를 스스로 의식한다"]
 
 [[records]]
 id = "R4"
 written_at = 2026-12-13T14:00:00
 text = "집에서 커피 내려 마시면 얼마나 아낄 수 있을까?"
+learn = ["집커피 대안에 관심이 있다 (가격 확인 필요)"]
+
+[[records]]              # 기간 중
+id = "R5"
+written_at = 2026-12-19T11:00:00
+text = "종강! 이제 카페에서 공부할 일은 당분간 없다"
+learn = ["12/18 기말이 끝나고 방학 시작 → 공부 장소 필요가 줄어듦"]
+
+[[records]]
+id = "R6"
+written_at = 2027-01-08T09:30:00
+about = "S_trip_0107"
+text = "여행 숙소랑 기차 예약 완료"
+learn = ["1/7 결제는 목표(여행)를 위한 지출"]
+
+# ---------------------------------------------------------------- 기록 습관 (12/15부터, 형식은 P1.toml 참고)
+[[record_habits]]
+id = "game"
+from = 2026-12-15
+categories = ["게임"]
+prob = 0.4
+delay_days = [1, 2]
+hours = [10, 23]
+texts = ["게임 {amount}원 결제", "또 게임에 씀"]
+
+[[record_habits]]
+id = "pcroom"
+from = 2026-12-15
+categories = ["PC방"]
+prob = 0.3
+delay_days = [1, 1]
+hours = [11, 22]
+texts = ["어제 PC방 {amount}원", "친구들이랑 PC방"]
+
+[[record_habits]]
+id = "friends"
+from = 2026-12-15
+categories = ["외식"]
+prob = 0.3
+delay_days = [1, 1]
+hours = [11, 22]
+texts = ["어제 친구들이랑 {amount}원", "모임 {amount}원"]
 
 # ---------------------------------------------------------------- 평가 케이스
 [[cases]]
@@ -332,6 +474,7 @@ phase = "live"
 level = 2
 target = "agent"
 signal = "R1: 카페에 한 달에 얼마나 쓰는지 모르겠다"
+record = "R1"            # 이 기록 뒤 첫 피드백에서 확인한다 (truth 의 check_at)
 expect = ["월 카페 지출을 계산 결과로 알려준다", "공부할 곳이 필요한지 묻는다 (H1)"]
 must_not = ["LLM이 카페 지출을 직접 합산한다", "카페를 끊으라고 한다"]
 why = "facts.levers.cafe_habit"
@@ -342,6 +485,7 @@ phase = "live"
 level = 2
 target = "agent"
 signal = "R2: 기말고사 기간 카페 기록"
+record = "R2"
 expect = ["시험기간이라는 맥락을 인정하고, 시험 뒤에 다시 보자고 제안한다"]
 must_not = ["시험기간 카페를 줄이라고 한다 (보호: 공부할 곳)"]
 why = "fixed_answers.protected, H2"
@@ -352,6 +496,7 @@ phase = "live"
 level = 2
 target = "data+agent"
 signal = "R3: 밤늦은 게임 결제 기록 (다음 날 들어옴)"
+record = "R3"
 expect = ["이번 달 게임 누적액을 계산 결과로 알려주고, 본인 상한(H3)과 비교한다"]
 must_not = ["LLM이 누적액을 직접 계산한다", "게임을 그만두라고 한다"]
 why = "H3, facts.monthly 의 게임"
@@ -363,6 +508,7 @@ level = 3
 target = "agent"
 composite = true
 signal = "R4: 집에서 커피 마시면 얼마나 아낄까 (거래 없는 질문 기록)"
+record = "R4"
 expect = [
   "카페 지출에서 '커피값'과 '공부 장소'를 나눠 본다 (H1)",
   "제약(H4)에 맞는 대안을 묻는다: 저가 테이크아웃 등",
@@ -397,7 +543,54 @@ id = "P2-C08"
 phase = "live"
 level = 1
 target = "agent"
-signal = "기록이 없는 날"
-expect = ["내역만 쌓고 분석·피드백을 만들지 않는다"]
-must_not = ["기록 없이 먼저 피드백을 보낸다"]
-why = "운영 단계 분석은 유저 기록이 들어올 때 시작한다"
+signal = "기록이 없는 날 (피드백 날이 아닐 때)"
+expect = ["내역만 쌓는다. 유저 이벤트가 없으니 유저 이해도 돌지 않는다"]
+must_not = ["피드백 날이 아닌데 먼저 메시지를 보낸다"]
+why = "운영 단계에서 유저에게 말하는 것은 주간(일요일 저녁)·월간(말일 저녁) 피드백뿐이다 (docs/10 §2)"
+
+# ---------------------------------------------------------------- 기간 중 케이스
+[[cases]]
+id = "P2-C09"
+phase = "live"
+level = 3
+target = "agent"
+issue = "vacation"
+signal = "12/19 이후 카페·교통·학식 감소, PC방·모임 증가 + R5 종강 기록"
+expect = ["방학으로 생긴 변화를 짚는다 (H6, R5)", "줄어든 카페 대신 늘어난 PC방·모임이 목표에 주는 영향을 계산 결과로 본다"]
+must_not = ["방학 중 카페 감소를 서비스 제안의 효과로 말한다", "카페 쟁점이 해결됐다고 단정한다 (개강하면 돌아올 수 있음)"]
+why = "cafe/transit/lunch/pcroom/friends boosts (12/19~)"
+
+[[cases]]
+id = "P2-C10"
+phase = "live"
+level = 2
+target = "agent"
+issue = "game_over_cap"
+signal = "12월 말 게임 이벤트 결제가 몰림"
+expect = ["12월 게임 누적액을 계산 결과로 말하고 본인 상한(H3)을 넘었다고 알린다"]
+must_not = ["게임을 그만두라고 한다", "LLM이 누적액을 직접 계산한다"]
+why = "facts.monthly 2026-12 의 게임 > 30,000"
+
+[[cases]]
+id = "P2-C11"
+phase = "live"
+level = 3
+target = "agent"
+composite = true
+issue = "trip_booking"
+signal = "1/7 하늘길투어 280,000원 + R6 예약 기록"
+expect = ["목표(여행)를 위해 쓴 돈으로 보고 목표 진척에 반영한다 (R6, H7)", "남은 금액·기간은 도구 결과로 말한다"]
+must_not = ["여행 예약을 충동 지출·과소비로 말한다", "예약 결제 때문에 목표에서 멀어졌다고 말한다"]
+why = "goal_tracking.goal_categories = 여행"
+
+[[cases]]
+id = "P2-C12"
+phase = "live"
+level = 2
+target = "agent"
+composite = true
+check_at = 2026-12-31
+signal = "12월 월간 피드백"
+expect = ["12월 목표 달성도(진척과 필요 금액)를 도구 결과로 말한다", "열린 쟁점(카페, 편의점, 게임 상한, 방학 변화)의 상태를 정리한다"]
+must_not = ["LLM이 월 합계나 진척을 직접 계산한다", "시험기간·방학 같은 기간 한정 변화를 추세로 말한다"]
+why = "facts.timeline[2026-12-31].goal_progress"

@@ -76,11 +76,11 @@
 
 ## 사용자 기록 (임시, contracts.py 합의 전)
 
-온보딩 이후 분석은 유저가 거래에 대한 기록을 쓸 때 시작한다. 데모에서는 `daily/YYYY-MM-DD/records.json`에 나온다.
+유저가 거래를 골라 기록을 남기는 것은 유저 이벤트다. 기록마다 유저 이해가 돌고(말하지 않음), 유저에게 말하는 것은 주간(일요일 저녁)·월간(말일 저녁) 피드백뿐이다 ([10 §2](10-llm-eval-plan.md#2-실행-구조)). 데모에서는 `daily/YYYY-MM-DD/records.json`에 나오고, 피드백 일정은 `manifest.json`의 `feedback`에 있다.
 
 | 필드 | 설명 |
 |---|---|
-| record_id, user_id, written_at, text | |
+| record_id, user_id, written_at, text | 시나리오 기록은 `R1`처럼, 기록 습관으로 만든 기록은 `R-<거래ID>` |
 | amount | 유저가 적은 금액 (선택) |
 | transaction_id | 기록 시점에 이미 들어온 거래의 `거래ID`. 아직 안 들어온 거래나 현금은 `null` |
 
