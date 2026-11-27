@@ -113,3 +113,20 @@ def test_path_allow_list_keeps_plan_pages_only():
            "https://www.lguplus.com/benefit-event/ongoing/82173"]
     assert all(path_allowed(u) for u in ok)
     assert not any(path_allowed(u) for u in bad)
+
+
+def test_mvno_plan_paths_pass_and_events_do_not():
+    ok = ["https://www.mvnohub.kr/product/products.do?themeTagIds=270",
+          "https://www.ktmmobile.com/m/content/mKtFeePlanDetail.do?contSeq=1137",
+          "https://www.uplusumobile.com/product/pric/pricDetail?seq=27",
+          "https://www.sk7mobile.com/prod/data/callingPlanView.do?prodCd=PD00000331",
+          "https://m.liivm.com/rateplan/plans/productsKp"]
+    bad = ["https://www.ktmmobile.com/event/eventDetail.do?ntcartSeq=937",
+           "https://www.uplusumobile.com/event-benefit/event/ongoing/12135",
+           "https://www.liivm.com/info/rateplan/rateplan/infoLteGain",
+           "https://m.liivm.com/biz/event/ongoing-detailed/01/EVT0001429",
+           "https://m.liivm.com/rateplan/plans/closed", "https://m.liivm.com/rateplan/plans/corp?detailNo=1"]
+    assert all(path_allowed(u) for u in ok) and not any(path_allowed(u) for u in bad)
+    allowed = ["mvnohub.kr", "sk7mobile.com"]
+    out = filter_sources([{"url": ok[3], "title": ""}, {"url": ok[0], "title": ""}], allowed, official={"mvnohub.kr"})
+    assert [s["title"] for s in out] == ["알뜰폰허브 요금제 목록", "SK7모바일 요금제 상세"]       # 공공 먼저

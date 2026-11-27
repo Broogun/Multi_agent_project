@@ -50,14 +50,21 @@ MEASURED_MARGIN = 1.1   # 실측값 여유분
 THROTTLE_MIN_MBPS: dict[str, int] = {"video": 3, "music": 1}
 UNLIMITED_FROM_GB = 100     # 이보다 많이 필요하면 GB 대신 '데이터 무제한' 으로 찾는다. 초기 규칙값
 
-# 통신 검색 허용 도메인. ⚠️ 실제 주소·약관 확인 전 (verified=False).
+# 통신 검색 허용 도메인. address_checked: 261127 도메인 제한 검색으로 요금제 페이지가 나오는 것을 확인.
+# ⚠️ 이용약관(딥링크·로고)은 아직 확인 전 (verified=False).
 ALLOWED_DOMAINS: list[dict] = [
-    {"domain": "smartchoice.or.kr", "name": "스마트초이스", "kind": "공공", "verified": False},
-    {"domain": "sktelecom.com", "name": "SKT", "kind": "통신사", "verified": False},
-    {"domain": "kt.com", "name": "KT", "kind": "통신사", "verified": False},
-    {"domain": "lguplus.com", "name": "LG U+", "kind": "통신사", "verified": False},
-    # 알뜰폰허브: 도메인 확인 후 추가
+    {"domain": "smartchoice.or.kr", "name": "스마트초이스", "kind": "공공", "address_checked": True, "verified": False},
+    {"domain": "mvnohub.kr", "name": "알뜰폰허브", "kind": "공공", "address_checked": True, "verified": False},
+    {"domain": "ktmmobile.com", "name": "KT M모바일", "kind": "알뜰폰", "address_checked": True, "verified": False},
+    {"domain": "uplusumobile.com", "name": "U+유모바일", "kind": "알뜰폰", "address_checked": True, "verified": False},
+    {"domain": "sk7mobile.com", "name": "SK7모바일", "kind": "알뜰폰", "address_checked": True, "verified": False},
+    {"domain": "liivm.com", "name": "KB리브모바일", "kind": "알뜰폰", "address_checked": True, "verified": False},
+    {"domain": "sktelecom.com", "name": "SKT", "kind": "통신사", "address_checked": False, "verified": False},
+    {"domain": "kt.com", "name": "KT", "kind": "통신사", "address_checked": True, "verified": False},
+    {"domain": "lguplus.com", "name": "LG U+", "kind": "통신사", "address_checked": True, "verified": False},
+    # 헬로모바일: 공식 주소 확인 못 함. 모요 등 민간 비교 서비스: 약관 확인 전이라 제외
 ]
+OFFICIAL_DOMAINS = {d["domain"] for d in ALLOWED_DOMAINS if d["kind"] == "공공"}
 
 
 class UsageAnswer(TypedDict, total=False):

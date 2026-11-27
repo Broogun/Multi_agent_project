@@ -30,13 +30,25 @@ FILE_EXTS = (".pdf", ".hwp", ".hwpx", ".zip", ".xlsx", ".xls", ".doc", ".docx", 
 # 실제 스모크에서 본 경로만 넣었다. 규칙이 없는 도메인은 경로에 요금제 단서가 있을 때만 통과.
 PATH_RULES: dict[str, tuple[str, ...]] = {
     "smartchoice.or.kr": ("/smc/plan/",),
+    "mvnohub.kr": ("/product/products",),
+    "ktmmobile.com": ("feeplandetail", "feeplanlist"),
+    "uplusumobile.com": ("/product/pric/",),
+    "sk7mobile.com": ("/prod/data/callingplan",),
+    "liivm.com": ("/rateplan/plans",),                 # /info/rateplan/ 은 판매중단 안내라 제외
     "kt.com": ("/wdic/productdetail", "/wdic/index"),
 }
 PLAN_HINTS = ("plan", "charge", "rate", "fee", "product", "요금")
+# 요금제 경로여도 일반 사용자에게 맞지 않는 페이지 (판매중단 · 법인)
+EXCLUDE_HINTS = ("closed", "/corp", "infolte", "inforeliable")
 # 페이지를 열 수 없어서, 제목이 없을 때는 주소 경로로 이름을 붙인다 (경로 이름 기반, 확인된 페이지 제목이 아님)
-SITE_NAMES = {"smartchoice.or.kr": "스마트초이스", "kt.com": "KT", "sktelecom.com": "SKT", "lguplus.com": "LG U+"}
+SITE_NAMES = {"smartchoice.or.kr": "스마트초이스", "mvnohub.kr": "알뜰폰허브", "ktmmobile.com": "KT M모바일",
+              "uplusumobile.com": "U+유모바일", "sk7mobile.com": "SK7모바일", "liivm.com": "KB리브모바일",
+              "kt.com": "KT", "sktelecom.com": "SKT", "lguplus.com": "LG U+"}
 PATH_LABELS = (("plancompare", "요금제 비교"), ("catalog", "요금제 목록"), ("recomend_search", "맞춤 요금제 찾기"),
-               ("prepay", "선불 요금제"), ("productdetail", "상품 상세"))
+               ("prepay", "선불 요금제"), ("productdetail", "상품 상세"), ("feeplandetail", "요금제 상세"),
+               ("callingplanview", "요금제 상세"), ("pricdetail", "요금제 상세"), ("callingplanlist", "요금제 목록"),
+               ("priclist", "요금제 목록"), ("products", "요금제 목록"), ("/rateplan/plans", "요금제"),
+               ("limit-plans", "요금제"))
 PANEL_TEXT = "이 조건으로 찾은 링크예요. 실제 요금과 조건은 각 사이트에서 확인하세요."
 EMPTY_TEXT = "조건에 맞는 링크를 찾지 못했어요. 조건을 바꿔 다시 찾아볼까요?"
 INSTRUCTIONS = ("허용된 사이트에서 조건에 맞는 요금제 안내 페이지를 찾아라. 가격을 단정하지 말고, "
@@ -89,6 +101,8 @@ def path_allowed(url: str, rules: dict[str, tuple[str, ...]] | None = None) -> b
     rules = PATH_RULES if rules is None else rules
     h = _host(url)
     path = urlsplit(url).path.lower()
+    if any(x in path for x in EXCLUDE_HINTS):
+        return False
     for d, prefixes in rules.items():
         if h == d or h.endswith("." + d):
             return any(path.startswith(x) or x in path for x in prefixes)
