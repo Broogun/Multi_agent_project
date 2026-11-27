@@ -39,13 +39,14 @@ USAGE_RATES: dict[str, dict] = {
 # 버튼 답 → 하루 밖에서 쓰는 시간 (시간). 실험용 초기값.
 OUTSIDE_HOURS: dict[str, float] = {"le30m": 0.5, "1h": 1.0, "2to3h": 2.5, "gt3h": 4.0}
 # 와이파이를 거의 못 쓰면 실내 사용도 모바일 데이터로 나간다고 본다. 실험용 초기값.
-WIFI_FACTOR: dict[str, float] = {"mostly": 1.0, "half": 1.5, "rarely": 2.0}
+WIFI_FACTOR: dict[str, float] = {"mostly": 1.0, "half": 1.2, "rarely": 1.5}
 DAYS = 30
 MARGIN = 1.2            # 여유분
 MEASURED_MARGIN = 1.1   # 실측값 여유분
 
 # 소진 후 속도 하한 (Mbps). 이 활동을 하면 이 속도는 있어야 체감이 버틴다고 보는 초기 규칙값.
 THROTTLE_MIN_MBPS: dict[str, int] = {"video": 3, "music": 1}
+UNLIMITED_FROM_GB = 100     # 이보다 많이 필요하면 GB 대신 '데이터 무제한' 으로 찾는다. 초기 규칙값
 
 # 통신 검색 허용 도메인. ⚠️ 실제 주소·약관 확인 전 (verified=False).
 ALLOWED_DOMAINS: list[dict] = [
@@ -137,7 +138,8 @@ def to_spec(a: UsageAnswer, est: GbEstimate | None = None) -> PlanSpec:
     est = est or estimate_monthly_gb(a)
     acts = [x for x in a.get("activities", []) if x in USAGE_RATES]
     throttle = max((THROTTLE_MIN_MBPS[x] for x in acts if x in THROTTLE_MIN_MBPS), default=None)
-    gb = max(1, math.ceil(est["high"]))
+    # 스펙 하한은 범위의 가운데로 잡는다 (최댓값을 쓰면 참고값의 넓은 폭 때문에 과하게 커진다). 범위는 가정에 보여 준다
+    gb = max(1, math.ceil(est["high"] if est["kind"] == "실측" else (est["low"] + est["high"]) / 2))
     assumptions = []
     if est["kind"] == "실측":
         assumptions.append(f"최근 실측 사용량 기준 ({est['calc']})")
@@ -163,7 +165,8 @@ def _won(n: int) -> str:
 
 def build_query(spec: PlanSpec) -> str:
     """스펙만으로 검색어를 만든다. 개인 정보가 섞여 들어와도 지운다."""
-    parts = ["알뜰폰 요금제", f"월 {spec['data_gb_min']}GB 이상"]
+    gb = spec["data_gb_min"]
+    parts = ["알뜰폰 요금제", "데이터 무제한" if gb >= UNLIMITED_FROM_GB else f"월 {gb}GB 이상"]
     if spec["throttle_mbps_min"]:
         parts.append(f"소진 후 {spec['throttle_mbps_min']}Mbps")
     if spec["unlimited_calls"]:

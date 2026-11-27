@@ -14,7 +14,7 @@ def test_daily_youtube_outside_needs_more_data_and_throttle():
     spec = to_spec(a, est)
     assert spec["profile"] == "밖에서 영상 위주"
     assert spec["throttle_mbps_min"] == 3
-    assert spec["data_gb_min"] >= est["high"]
+    assert est["low"] <= spec["data_gb_min"] <= est["high"]          # 가운데 값
 
 
 def test_music_only_needs_far_less_than_video():
@@ -58,3 +58,8 @@ def test_search_request_uses_allowed_domains_and_assumptions():
     req = build_search_request({"activities": ["video", "music"], "outside": "2to3h", "wifi": "mostly"})
     assert req["allowed_domains"] == [d["domain"] for d in ALLOWED_DOMAINS]
     assert req["spec"]["assumptions"] and "GB" in req["query"]
+
+
+def test_very_high_need_searches_unlimited():
+    spec = to_spec({"activities": ["video"], "outside": "gt3h", "wifi": "rarely"})
+    assert spec["data_gb_min"] >= 100 and "데이터 무제한" in build_query(spec)
