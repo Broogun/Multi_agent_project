@@ -518,7 +518,6 @@ def onboarding_goal_policy(seen=None):
             steps = [lambda: _call("calculate_many", {"expressions": ["(353500 + 145400 + 180800) // 3",
                                                                        "13500 + 12800", "242400 / 10"]}),
                      lambda: _call("set_report", {"monthly_leftover": outs[0]["results"][0]["result"],
-                                                  "months": [{"month": "2026-09", "leftover": 353500}],
                                                   "patterns": ["주말 저녁 배달이 잦다"]}),
                      lambda: _call("propose_goal", P1_GOAL),
                      lambda: _call("propose_action", {"target": "무비온·소리랑", "action": "해지", "saving_monthly": 26300,
@@ -587,3 +586,34 @@ def test_onboarding_gates_need_report_numbers_and_goal_check():
     agent._c_calculate_many(ctx, board, {"expressions": ["226566 - 10000"]})
     agent._c_set_report(ctx, board, {"monthly_leftover": 216566})                           # 남는 돈이 바뀌면
     assert board.goal_proposal == {} and board.review == {}                                # 목표안·리뷰를 다시 한다
+
+
+
+# ------------------------------------------------------------------ PR #22 사후 리뷰 반영
+def test_report_leftover_must_be_calculated_not_raw_tool_number():
+    agent, board, ctx = SwarmAgent(dry_run_llm()), Board(), _onboarding_ctx()
+    ctx.tools.call("flow_summary", {})
+    raw = ctx.tools.log[-1]["output"]["value"]["months"][-1]["수입"]                 # 가공 전 합계 (도구 결과에는 있다)
+    assert "직접 계산" in agent._c_set_report(ctx, board, {"monthly_leftover": raw})["error"]
+
+
+def test_report_months_must_be_consistent():
+    agent, board, ctx = SwarmAgent(dry_run_llm()), Board(), _onboarding_ctx()
+    agent._c_calculate_many(ctx, board, {"expressions": ["2330000 - 1976500", "2330000 - 2149200", "(353500 + 180800) // 2"]})
+    bad = {"monthly_leftover": 267150, "months": [{"month": "2026-10", "income": 2330000, "spending": 1976500, "leftover": 180800}]}
+    assert "다르다" in agent._c_set_report(ctx, board, bad)["error"]                   # 수입 − 지출 ≠ 남는 돈
+    avg_bad = {"monthly_leftover": 353500, "months": [
+        {"month": "2026-10", "income": 2330000, "spending": 1976500, "leftover": 353500},
+        {"month": "2026-11", "income": 2330000, "spending": 2149200, "leftover": 180800}]}
+    assert "평균" in agent._c_set_report(ctx, board, avg_bad)["error"]
+    ok = {**avg_bad, "monthly_leftover": 267150}
+    assert agent._c_set_report(ctx, board, ok)["ok"]
+
+
+def test_goal_uses_fixed_saved_not_llm_value():
+    agent, board, ctx = SwarmAgent(dry_run_llm()), Board(), _onboarding_ctx()
+    agent.memory["fixed_answers"] = {"saved": 800000}
+    agent._c_calculate_many(ctx, board, {"expressions": ["(353500 + 145400 + 180800) // 3"]})
+    agent._c_set_report(ctx, board, {"monthly_leftover": 226566})
+    agent._c_propose_goal(ctx, board, P1_GOAL | {"current_saved": 100000})
+    assert board.goal_proposal["current_saved"] == 800000

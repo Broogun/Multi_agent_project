@@ -579,6 +579,18 @@ class SwarmAgent:
         v = verify_response("\n".join(report_texts({"report": rep})), ctx.tools.results())
         if not v["ok"]:
             return {"ok": False, "error": f"도구 결과에 없는 숫자: {', '.join(v['bad'])}. calculate_many 로 계산한 값만 쓴다."}
+        # 남는 돈은 '도구 결과 어딘가의 숫자' 가 아니라 이번에 직접 계산한 값이어야 한다 (flow_summary 원시 합계를 그대로 쓰지 않게)
+        known = self._known(ctx)
+        lefts = [m["leftover"] for m in rep["months"] if m.get("leftover") is not None]
+        if abs(left) not in known or any(not isinstance(x, int) or abs(x) not in known for x in lefts):
+            return {"ok": False, "error": "남는 돈(monthly_leftover · 달별 leftover)은 calculate_many 로 직접 계산한 값만 쓴다."}
+        # 달별 수입 − 지출 = 남는 돈, 평균 = 달별 남는 돈의 평균 (원 단위 내림·반올림 차이 1원까지)
+        for m in rep["months"]:
+            inc, sp, lo = m.get("income"), m.get("spending"), m.get("leftover")
+            if all(isinstance(x, int) for x in (inc, sp, lo)) and inc - sp != lo:
+                return {"ok": False, "error": f"{m.get('month')}: 수입 − 지출({inc - sp:,})과 남는 돈({lo:,})이 다르다."}
+        if lefts and abs(left - sum(lefts) / len(lefts)) > 1:
+            return {"ok": False, "error": f"monthly_leftover({left:,})가 달별 남는 돈의 평균과 다르다."}
         board.report = rep
         if board.goal_proposal:                      # 남는 돈이 바뀌면 목표안의 줄여야 할 금액·검산·리뷰를 다시 한다
             board.goal_proposal, board.goal_check, board.review = {}, {}, {}
@@ -588,6 +600,9 @@ class SwarmAgent:
         if not board.report:
             return {"ok": False, "error": "set_report 로 보고서(월 남는 돈)를 먼저 올려라."}
         amount, saved, deadline = a.get("amount"), a.get("current_saved"), str(a.get("deadline", ""))[:10]
+        fixed_saved = (self.memory.get("fixed_answers") or {}).get("saved")
+        if isinstance(fixed_saved, int) and not isinstance(fixed_saved, bool):
+            saved = fixed_saved                      # 모아 둔 돈은 고정 답변 값을 그대로 쓴다 (LLM 이 바꾸지 못하게)
         if not all(isinstance(x, int) and not isinstance(x, bool) and x >= 0 for x in (amount, saved)) or amount <= saved:
             return {"ok": False, "error": "amount(목표 금액)와 current_saved(모아 둔 돈)는 정수이고 목표 금액이 더 커야 한다."}
         try:
@@ -599,7 +614,10 @@ class SwarmAgent:
         if f.get("status") != "ok":
             return {"ok": False, "error": f"forecast_goal 실패: {f.get('caveats')}"}
         need, left = f["value"]["monthly_required"], board.report["monthly_leftover"]
-        cut = ctx.tools.call("calculate", {"expression": f"{need} - {left}"})["value"]["result"]
+        c = ctx.tools.call("calculate", {"expression": f"{need} - {left}"})
+        if c.get("status") != "ok" or not isinstance((c.get("value") or {}).get("result"), int):
+            return {"ok": False, "error": f"줄여야 할 금액 계산 실패: {c.get('caveats')}"}
+        cut = c["value"]["result"]
         board.goal_proposal = {"name": str(a.get("name", ""))[:40], "amount": amount, "deadline": deadline,
                                "current_saved": saved, "monthly_required": need}
         board.report["required_cut"] = max(0, cut)
