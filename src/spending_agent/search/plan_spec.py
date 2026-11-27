@@ -7,7 +7,9 @@
     ④ build_search_request: 개인정보 없는 검색어 + 허용 도메인 (검색 호출은 하지 않는다)
 
 지키는 것 (docs/06-search-policy.md):
-- 검색어에는 스펙과 예산만 넣는다. 통신사·결합·나이 같은 개인 정보는 넣지 않는다.
+- 검색어에는 스펙만 넣는다. 예산(지금 통신비일 수 있는 재무 정보)·통신사·결합·나이는 넣지 않는다.
+  예산은 스펙에 남겨 화면에서 결과를 거를 때만 쓴다.
+- 사용량을 추정할 수 없으면 검색 요청을 만들지 않고 정보가 더 필요하다고 돌려준다.
 - 검색 결과의 가격으로 절감액을 계산하지 않는다. 이 모듈은 검색 **요청**만 만든다.
 - 추정은 범위와 가정을 같이 돌려준다. 화면에서 사용자가 가정을 고치면 다시 계산한다.
 
@@ -48,14 +50,23 @@ MEASURED_MARGIN = 1.1   # 실측값 여유분
 THROTTLE_MIN_MBPS: dict[str, int] = {"video": 3, "music": 1}
 UNLIMITED_FROM_GB = 100     # 이보다 많이 필요하면 GB 대신 '데이터 무제한' 으로 찾는다. 초기 규칙값
 
-# 통신 검색 허용 도메인. ⚠️ 실제 주소·약관 확인 전 (verified=False).
+# 통신 검색 허용 도메인. address_checked: 261127 도메인 제한 검색으로 요금제 페이지가 나오는 것을 확인.
+# ⚠️ 이용약관(딥링크·로고)은 아직 확인 전 (verified=False).
 ALLOWED_DOMAINS: list[dict] = [
-    {"domain": "smartchoice.or.kr", "name": "스마트초이스", "kind": "공공", "verified": False},
-    {"domain": "sktelecom.com", "name": "SKT", "kind": "통신사", "verified": False},
-    {"domain": "kt.com", "name": "KT", "kind": "통신사", "verified": False},
-    {"domain": "lguplus.com", "name": "LG U+", "kind": "통신사", "verified": False},
-    # 알뜰폰허브: 도메인 확인 후 추가
+    {"domain": "smartchoice.or.kr", "name": "스마트초이스", "kind": "공공", "address_checked": True, "verified": False},
+    {"domain": "mvnohub.kr", "name": "알뜰폰허브", "kind": "공공", "address_checked": True, "verified": False},
+    {"domain": "ktmmobile.com", "name": "KT M모바일", "kind": "알뜰폰", "address_checked": True, "verified": False},
+    {"domain": "uplusumobile.com", "name": "U+유모바일", "kind": "알뜰폰", "address_checked": True, "verified": False},
+    {"domain": "sk7mobile.com", "name": "SK7모바일", "kind": "알뜰폰", "address_checked": True, "verified": False},
+    {"domain": "liivm.com", "name": "KB리브모바일", "kind": "알뜰폰", "address_checked": True, "verified": False},
+    {"domain": "direct.lghellovision.net", "name": "LG헬로모바일", "kind": "알뜰폰", "address_checked": True, "verified": False},
+    # 민간 비교 서비스(모요 등)는 넣지 않는다: 우리 기능과 역할이 겹치고, 제휴 상품이 앞에 나와 중립이 깨진다.
+    # 공공 비교(스마트초이스·알뜰폰허브)로 충분하다. 모요 공식 API(문의 후 제공)는 향후 과제로 따로 검토.
+    {"domain": "sktelecom.com", "name": "SKT", "kind": "통신사", "address_checked": False, "verified": False},
+    {"domain": "kt.com", "name": "KT", "kind": "통신사", "address_checked": True, "verified": False},
+    {"domain": "lguplus.com", "name": "LG U+", "kind": "통신사", "address_checked": True, "verified": False},
 ]
+OFFICIAL_DOMAINS = {d["domain"] for d in ALLOWED_DOMAINS if d["kind"] == "공공"}
 
 
 class UsageAnswer(TypedDict, total=False):
@@ -72,7 +83,7 @@ class UsageAnswer(TypedDict, total=False):
 class GbEstimate(TypedDict):
     low: float
     high: float
-    kind: Literal["실측", "추정"]
+    kind: Literal["실측", "추정", "추정 불가"]
     calc: str
     caveats: list[str]
 
@@ -89,7 +100,8 @@ class PlanSpec(TypedDict):
 
 
 class SearchRequest(TypedDict):
-    query: str
+    status: Literal["ok", "needs_info"]
+    query: str | None
     allowed_domains: list[str]
     spec: PlanSpec
 
@@ -108,7 +120,7 @@ def estimate_monthly_gb(a: UsageAnswer) -> GbEstimate:
 
     acts = [x for x in a.get("activities", []) if x in USAGE_RATES]
     if not acts:
-        return {"low": 0.0, "high": 0.0, "kind": "추정", "calc": "밖에서 하는 활동 없음",
+        return {"low": 0.0, "high": 0.0, "kind": "추정 불가", "calc": "활동 답 없음",
                 "caveats": ["활동을 고르지 않아 추정할 수 없다. 실측 사용량을 넣거나 질문에 답해야 한다."]}
     hours = OUTSIDE_HOURS.get(a.get("outside", "1h"), 1.0)
     wifi = WIFI_FACTOR.get(a.get("wifi", "mostly"), 1.0)
@@ -123,9 +135,11 @@ def estimate_monthly_gb(a: UsageAnswer) -> GbEstimate:
     return {"low": _round1(lo), "high": _round1(hi), "kind": "추정", "calc": calc, "caveats": caveats}
 
 
-def _profile(acts: list[str]) -> str:
+def _profile(acts: list[str], kind: str) -> str:
+    if kind == "추정 불가":
+        return "정보 부족"
     if not acts:
-        return "거의 와이파이"
+        return "실측 사용량 기준"              # 활동 답이 없다고 와이파이만 쓴다고 볼 수는 없다
     if "video" in acts:
         return "밖에서 영상 위주"
     if acts == ["music"]:
@@ -139,7 +153,12 @@ def to_spec(a: UsageAnswer, est: GbEstimate | None = None) -> PlanSpec:
     acts = [x for x in a.get("activities", []) if x in USAGE_RATES]
     throttle = max((THROTTLE_MIN_MBPS[x] for x in acts if x in THROTTLE_MIN_MBPS), default=None)
     # 스펙 하한은 범위의 가운데로 잡는다 (최댓값을 쓰면 참고값의 넓은 폭 때문에 과하게 커진다). 범위는 가정에 보여 준다
-    gb = max(1, math.ceil(est["high"] if est["kind"] == "실측" else (est["low"] + est["high"]) / 2))
+    if est["kind"] == "추정 불가":
+        gb = 0                                   # 0 = 모름. 1GB 같은 그럴듯한 값으로 바꾸지 않는다
+    elif est["kind"] == "실측":
+        gb = max(1, math.ceil(est["high"]))
+    else:
+        gb = max(1, math.ceil((est["low"] + est["high"]) / 2))
     assumptions = []
     if est["kind"] == "실측":
         assumptions.append(f"최근 실측 사용량 기준 ({est['calc']})")
@@ -156,16 +175,14 @@ def to_spec(a: UsageAnswer, est: GbEstimate | None = None) -> PlanSpec:
     budget = a.get("budget_monthly")
     return {"data_gb_min": gb, "throttle_mbps_min": throttle, "unlimited_calls": bool(a.get("heavy_calls")),
             "tethering": bool(a.get("tethering")), "budget_max": int(budget) if budget else None,
-            "profile": _profile(acts), "assumptions": assumptions, "caveats": caveats}
-
-
-def _won(n: int) -> str:
-    return f"{n // 10000}만원" if n % 10000 == 0 else f"{n:,}원"
+            "profile": _profile(acts, est["kind"]), "assumptions": assumptions, "caveats": caveats}
 
 
 def build_query(spec: PlanSpec) -> str:
-    """스펙만으로 검색어를 만든다. 개인 정보가 섞여 들어와도 지운다."""
+    """스펙만으로 검색어를 만든다. 예산 같은 재무 정보는 넣지 않는다."""
     gb = spec["data_gb_min"]
+    if gb <= 0:
+        raise ValueError("필요 데이터를 모르는 상태로는 검색어를 만들지 않는다")
     parts = ["알뜰폰 요금제", "데이터 무제한" if gb >= UNLIMITED_FROM_GB else f"월 {gb}GB 이상"]
     if spec["throttle_mbps_min"]:
         parts.append(f"소진 후 {spec['throttle_mbps_min']}Mbps")
@@ -173,12 +190,13 @@ def build_query(spec: PlanSpec) -> str:
         parts.append("통화 무제한")
     if spec["tethering"]:
         parts.append("테더링")
-    if spec["budget_max"]:
-        parts.append(f"월 {_won(spec['budget_max'])} 이하")
     return PII.sub("", " ".join(parts)).strip()
 
 
 def build_search_request(a: UsageAnswer) -> SearchRequest:
     """질문 답 → 검색 요청 (검색은 하지 않는다). 호출부가 GPT 웹 검색에 query 와 allowed_domains 를 넘긴다."""
     spec = to_spec(a)
-    return {"query": build_query(spec), "allowed_domains": [d["domain"] for d in ALLOWED_DOMAINS], "spec": spec}
+    domains = [d["domain"] for d in ALLOWED_DOMAINS]
+    if spec["data_gb_min"] <= 0:
+        return {"status": "needs_info", "query": None, "allowed_domains": domains, "spec": spec}
+    return {"status": "ok", "query": build_query(spec), "allowed_domains": domains, "spec": spec}
