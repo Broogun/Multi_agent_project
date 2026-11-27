@@ -1,3 +1,5 @@
+import pytest
+
 from spending_agent.search.plan_spec import (
     ALLOWED_DOMAINS,
     build_query,
@@ -39,17 +41,30 @@ def test_unverified_rates_are_flagged():
     assert any("확인되지" in c for c in estimate_monthly_gb({"activities": ["music"]})["caveats"])
 
 
-def test_no_activity_cannot_estimate():
+def test_no_activity_cannot_estimate_and_blocks_query():
     est = estimate_monthly_gb({"activities": []})
-    assert est["high"] == 0 and est["caveats"]
-    assert to_spec({"activities": []}, est)["data_gb_min"] == 1
+    assert est["kind"] == "추정 불가" and est["caveats"]
+    spec = to_spec({"activities": []}, est)
+    assert spec["data_gb_min"] == 0 and spec["profile"] == "정보 부족"        # 1GB 같은 값으로 꾸미지 않는다
+    for a in ({}, {"activities": []}):
+        req = build_search_request(a)
+        assert req["status"] == "needs_info" and req["query"] is None
+    with pytest.raises(ValueError):
+        build_query(spec)
+
+
+def test_measured_only_profile_is_neutral():
+    spec = to_spec({"measured_gb_monthly": 120})
+    assert spec["profile"] == "실측 사용량 기준" and spec["data_gb_min"] == 132
 
 
 def test_query_has_spec_and_budget_only():
     spec = to_spec({"activities": ["video"], "outside": "1h", "heavy_calls": True, "budget_monthly": 20000,
                     "family_bundle": True})
     q = build_query(spec)
-    assert q.startswith("알뜰폰 요금제") and "소진 후 3Mbps" in q and "통화 무제한" in q and "월 2만원 이하" in q
+    assert q.startswith("알뜰폰 요금제") and "소진 후 3Mbps" in q and "통화 무제한" in q
+    assert "만원" not in q and "20000" not in q and "20,000" not in q   # 예산은 검색어에 넣지 않는다
+    assert spec["budget_max"] == 20000                         # 화면에서 거를 때만 쓴다
     assert "결합" not in q                                    # 개인 사정은 검색어에 넣지 않는다
     assert any("결합" in c for c in spec["caveats"])           # 대신 화면 주의 문구로
 
@@ -63,3 +78,8 @@ def test_search_request_uses_allowed_domains_and_assumptions():
 def test_very_high_need_searches_unlimited():
     spec = to_spec({"activities": ["video"], "outside": "gt3h", "wifi": "rarely"})
     assert spec["data_gb_min"] >= 100 and "데이터 무제한" in build_query(spec)
+
+
+def test_billing_amount_never_reaches_query():
+    req = build_search_request({"activities": ["video"], "outside": "1h", "budget_monthly": 65780})
+    assert req["status"] == "ok" and "65" not in req["query"] and "원" not in req["query"]
