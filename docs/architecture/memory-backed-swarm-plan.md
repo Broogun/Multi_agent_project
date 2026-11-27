@@ -33,7 +33,7 @@
 
 | 시점 | 들어오는 입력 | 서비스가 하는 일 | 유저에게 말하는 내용 | 전략 개입 |
 |---|---|---|---|---|
-| **① 온보딩 (D0, 1회)** | 고정 질의(목표·수입·거주·보호 지출) + 3개월 통합 거래 CSV | 거래 함정 필터링, 숨은 사실 확인용 추가 질의(최대 3개), 진짜 원인 진단, 초기 선택지 도출 | 진단 요약 + 질문 또는 선택지 0~3개 | **함** |
+| **① 온보딩 (D0, 1회)** | 고정 질의(수입·거주·보호 지출·모아 둔 돈, **목표는 없음**) + 3개월 통합 거래 CSV | 거래 함정 필터링, 달마다 수입·지출·남는 돈 계산, 확인 질문 + 목표 대화(합쳐서 최대 5개), 진짜 원인 진단, 목표안·선택지 도출 | 보고서(카테고리별 소비, 패턴, 남는 돈, 줄여야 할 금액) + 목표안 + 선택지 0~3개 → 유저가 목표안을 고쳐 **목표 생성 버튼** | **함** |
 | **② 매일 거래 동기화** | 하루치 통합 거래 CSV | DB 적재만 수행 (밤 10시 이후 결제는 다음 날 반영) | 말 안 함 | 안 함 |
 | **③ 유저 이벤트 (수시)** | 거래 기록 작성(거래 전 선기록·현금 포함), 질문 답, 수락·보류·거절 | 소비 패턴·추정 사실·다음 질문 후보를 **유저 메모리에 갱신** + 오늘 요약·목표 진행률 계산 | **목표 진행률 + 오늘 소비 간단 RECAP + 짧은 코멘트/공감** | **안 함** *(단, 기록 안에 직접 질문·고민을 적으면 자율 판단으로 연결 가능)* |
 | **④ 정기 피드백 (주간·월간)** | 일요일 저녁(주간) · 말일 저녁(월간) 도래 | 쟁점 상태 전이(신규·유지·개선·악화·해결, 무관 변화 분리) + 목표 달성도 + 복합 선택지 0~3개 + 질문(주 3개 한도) | 정리된 주간/월간 피드백 + 선택지 + 수락·보류·거절 버튼 | **함** |
@@ -88,10 +88,10 @@ flowchart LR
 
 | 에이전트 | 핵심 목표(관점) | 주요 도구(Tools) | Handoff 대상 | 엄격히 금지하는 것 |
 |---|---|---|---|---|
-| **1. 유저 상담 (`counselor`)** | 유저의 감정·지속 가능성·보호 지출을 지키며 이해하기 쉽게 소통 | `handoff_to_analyst`, `handoff_to_strategist`, `handoff_to_reviewer`, `respond_to_user` | 분석 필요 시 `analyst`, 대안·계산 요청 시 `strategist`, 검증 확인 필요 시 `reviewer` | **자체 암산, 자체 절약 전략 생성**, 보호 지출 건드리기, 비난·강요 |
+| **1. 유저 상담 (`counselor`)** | 유저의 감정·지속 가능성·보호 지출을 지키며 이해하기 쉽게 소통. 온보딩에서는 목표 대화(무엇·얼마·언제, 바꿀 여지)를 맡는다 (261127) | `handoff_to_analyst`, `handoff_to_strategist`, `handoff_to_reviewer`, `respond_to_user` | 분석 필요 시 `analyst`, 대안·계산 요청 시 `strategist`, 검증 확인 필요 시 `reviewer` | **자체 암산, 자체 절약 전략 생성**, 보호 지출 건드리기, 비난·강요 |
 | **2. 유저 이해 (`analyst`)** | 거래·기록 속 함정을 걷어내고 진짜 원인(수입 감소 vs 지출 과다 등)과 꼭 물을 질문만 선별 | `propose_profile_delta`, `update_issue`, `queue_question`, `handoff_to_counselor`, `handoff_to_strategist`, `handoff_to_reviewer` | 질문 필요 시 `counselor`, 대안 필요 시 `strategist`, 정기 상태 정리 시 `reviewer` | 정형 이체(월세·적금) 질문 낭비, 추정치를 `hard_fact`로 단정, 장기 DB 직접 덮어쓰기 |
-| **3. 전략가 (`strategist`)** | 목표 부족액을 실제로 채울 수 있는 현실적 대안 조합(구독·계약·구매비교·습관·보류) 도출 | 계산·비교 Tool(`forecast_goal`, `calc_net_saving`, `calc_bulk_purchase`, `get_mobile_plan_candidates`, `get_policy_rules`, `get_price_baseline`), 습관 Tool(`get_strategy_library`, `get_spending_pattern`), `open_search_panel`, `propose_action`, `handoff_to_reviewer`, `handoff_to_analyst`, `handoff_to_counselor` | 대안 완성 시 **반드시 `reviewer`로 검증 요청**, 정보 부족 시 `analyst` 또는 `counselor` | 검색 결과 가격을 계산 입력으로 사용, `reviewer` 검증 없이 최종 제안 확정 |
-| **4. 리뷰어 (`reviewer`)** | **C08 총량 합산 검증**, 함정·보호지출·거절이력 차단, 성과 추적(`Outcome Tracking`)에서 외부 요인(방학·약정종료) 분리 | `check_gap_coverage`(코드 검산), `update_issue_status`, `record_review_verdict`, `handoff_to_strategist`(반려), `handoff_to_counselor`(통과), `handoff_to_analyst` | **부족·위반 시 사유와 함께 `strategist`로 반려**, 통과 시 `counselor`로 전달 | 대안 자체를 새로 지어내기, 서비스 무관 변화를 절약 성과로 집계 |
+| **3. 전략가 (`strategist`)** | 목표 부족액을 실제로 채울 수 있는 현실적 대안 조합(구독·계약·구매비교·습관·보류) 도출. 온보딩에서는 보고서(`set_report`)와 목표안(`propose_goal`, 필요 월 저축액은 코드 계산)도 올린다 (261127) | 계산·비교 Tool(`forecast_goal`, `calc_net_saving`, `calc_bulk_purchase`, `get_mobile_plan_candidates`, `get_policy_rules`, `get_price_baseline`), 습관 Tool(`get_strategy_library`, `get_spending_pattern`), `open_search_panel`, `propose_action`, `handoff_to_reviewer`, `handoff_to_analyst`, `handoff_to_counselor` | 대안 완성 시 **반드시 `reviewer`로 검증 요청**, 정보 부족 시 `analyst` 또는 `counselor` | 검색 결과 가격을 계산 입력으로 사용, `reviewer` 검증 없이 최종 제안 확정 |
+| **4. 리뷰어 (`reviewer`)** | **C08 총량 합산 검증**, 함정·보호지출·거절이력 차단, 성과 추적(`Outcome Tracking`)에서 외부 요인(방학·약정종료) 분리. 온보딩에서는 목표안이 남는 돈 + 제안 절감으로 닿는지 검산 (261127) | `check_gap_coverage`(코드 검산), `check_goal`(온보딩 목표안 검산), `update_issue_status`, `record_review_verdict`, `handoff_to_strategist`(반려), `handoff_to_counselor`(통과), `handoff_to_analyst` | **부족·위반 시 사유와 함께 `strategist`로 반려**, 통과 시 `counselor`로 전달 | 대안 자체를 새로 지어내기, 서비스 무관 변화를 절약 성과로 집계 |
 
 > **전략가를 1개로 통합한 이유:** 기존 `tools.py`에서 `strategy_calc`와 `strategy_habit`을 나눴더니 호출 누락과 `propose_action` 권한 분산 문제가 생겼다. 1차 구현에서는 **`strategist` 1명이 정량·습관 도구를 함께 조합**하도록 단순화하고, 향후 P2/P3 평가에서 도구 혼선이 실제로 관측될 때만 내부 서브에이전트(`calc ↔ habit`)로 분리한다.
 
