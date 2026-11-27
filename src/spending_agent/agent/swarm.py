@@ -40,13 +40,26 @@ DOMAIN: dict[str, list[str]] = {
 }
 CONTROL: dict[str, list[str]] = {
     "analyst": ["update_issue"],
-    "strategist": ["propose_action", "drop_action"],
-    "reviewer": ["check_gap_coverage", "record_review", "update_issue"],
+    "strategist": ["calculate_many", "propose_action", "drop_action"],
+    "reviewer": ["calculate_many", "check_gap_coverage", "record_review", "update_issue"],
     "counselor": ["respond_to_user", "edit_suggestion_text"],
 }
 NO_SAVING_ACTIONS = ("목표 조정",)      # 절감액이 아니라 필요액을 바꾸는 제안
+
+# ------------------------------------------------------------------ 비용 상한 (P1 실측 338만 토큰 → 줄이기)
+NO_CACHE = ("ask_user", "calculate", "forecast_goal")
+MAX_CALCS = 10                    # calculate_many 한 번에 식 개수
+TX_LIMIT_DEFAULT, TX_LIMIT_MAX = 20, 30
+TX_FIELDS = ("거래ID", "날짜", "내용", "금액", "소분류")   # 거래 조회 결과에서 LLM 에 넘기는 열
+TOOL_TEXT_LIMIT = 6000            # 도구 결과를 LLM 에 넣을 때 자르는 길이 (문자)
+MEMORY_CAPS = {"active_issues": 7, "qa": 5, "recent_decisions": 8, "patterns": 6, "queued_questions": 3}
 _STR, _INT = {"type": "string"}, {"type": "integer"}
 CONTROL_SPECS = {
+    "calculate_many": {
+        "description": f"여러 계산을 한 번에 (최대 {MAX_CALCS}개). 유저에게 말할 숫자·절감액·부족분은 이걸로 계산한다.",
+        "parameters": {"type": "object", "properties": {
+            "expressions": {"type": "array", "items": _STR, "description": "예: [\"240000 - 200000\", \"13500 + 7900\"]"}},
+            "required": ["expressions"]}},
     "update_issue": {
         "description": "작업판의 쟁점을 추가하거나 상태를 바꾼다. 같은 유형·대상이면 덮어쓴다.",
         "parameters": {"type": "object", "properties": {
@@ -97,14 +110,15 @@ ROLE = {
 - 정기적으로 보이는 이체(regular=true)는 묻지 말고 추정으로 둔다. 질문은 숨은 사실(계속 쓸지, 정산인지, 용도 불명) 확인에만 쓴다.
 - update_issue 로 쟁점을 정리한 뒤, 대안이 필요하면 handoff_to_strategist, 바꿀 게 없으면 handoff_to_counselor.""",
     "strategist": """너는 '전략가(strategist)'다. 목표: 목표 월 부족분을 실제로 채울 현실적인 제안 조합을 만든다.
-- 부족분 = 필요 월 저축액 − 지금 월 저축. calculate 로 계산해 둔다.
-- 후보마다 calculate 로 월 절감액을 구하고 propose_action 으로 올린다. 보호 지출·최근 거절한 제안은 넣지 않는다.
+- 부족분 = 필요 월 저축액 − 지금 월 저축. 부족분과 후보별 월 절감액을 calculate_many 한 번으로 같이 계산한다.
+- 계산한 값으로 propose_action 을 올린다 (한 스텝에 여러 개를 같이 불러도 된다). 보호 지출·최근 수락·거절한 제안은 넣지 않는다.
 - 하나로 모자라면 여러 쟁점(구독·배달 등)을 묶는다. 줄이기는 작게(주 1~2회).
 - 다 올렸으면 반드시 handoff_to_reviewer 로 검증을 요청한다.""",
     "reviewer": """너는 '리뷰어(reviewer)'다. 목표: 제안 조합이 부족분을 채우는지 코드로 검산하고 위반을 막는다.
-- check_gap_coverage 로 부족분 대비 합계를 본다. 모자라면 record_review(ok=false, 남은 금액) 후 handoff_to_strategist (반려).
-- 보호 지출을 건드리거나, 서비스와 무관한 변화를 성과로 말하거나, 근거 없는 제안이 있으면 반려한다.
-- 채워졌거나, 더 채울 현실적 후보가 없다는 사유가 있으면 record_review(ok=true) 후 handoff_to_counselor.""",
+- 부족분은 calculate_many 로 계산하고 check_gap_coverage 로 합계를 본다.
+- 반려는 고칠 것이 분명할 때만: 보호 지출 침해, 서비스와 무관한 변화를 성과로 말함, 근거 없는 제안, 더 붙일 후보가 작업판 쟁점에 남아 있음.
+- 부족분을 다 못 채워도 더 붙일 현실적 후보가 없으면 반려하지 말고 record_review(ok=true, '남은 부족분 N원, 이유') 후 handoff_to_counselor.
+- 이미 한 번 반려했는데 제안이 그대로면 다시 반려하지 말고 남은 부족분을 적고 통과시킨다.""",
     "counselor": """너는 '유저 상담(counselor)'이다. 유저에게 말하는 유일한 창구다. 목표: 부담 없이 이해되게 전한다.
 - 작업판의 쟁점·제안·리뷰 결과를 바탕으로 respond_to_user 로 끝낸다. 새 전략을 만들지 말고 숫자를 지어내지 않는다.
 - 분석이 비었으면 handoff_to_analyst, 제안이 리뷰 전이면 handoff_to_reviewer. (강제 마무리 중이면 넘기지 말고 바로 respond_to_user)
@@ -113,6 +127,7 @@ ROLE = {
 
 RULES = """[지금] {today} ({wd}) {kind}. 다음 피드백: {nxt}
 질문 한도: 이번 일에서 최대 {max_q}개 (ask_user). 제안은 최대 3개.
+비용: 필요한 도구는 한 스텝에 같이 부른다. 작업판에 있는 결과는 다시 조회하지 않는다. 거래 조회는 조건을 좁혀 20건 안팎으로.
 쟁점 유형: {issue_types}
 쟁점 상태: {statuses}
 제안 행동: {actions}.
@@ -130,6 +145,23 @@ def _list(x) -> list[str]:
     if isinstance(x, (list, tuple)):
         return [str(i) for i in x if str(i).strip()]
     return [str(x)]
+
+
+def _key(name: str, args: dict) -> str:
+    return f"{name}:{json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)}"
+
+
+def _slim(name: str, out: dict) -> dict:
+    """LLM 에 넘길 모양으로 줄인다 (log 에는 원본이 그대로 남는다). 거래 조회는 필요한 열만."""
+    if name == "list_transactions" and isinstance(out.get("value"), dict):
+        v = out["value"]
+        rows = [{k: r.get(k) for k in TX_FIELDS} for r in v.get("rows", [])]
+        return {**out, "value": {**v, "rows": rows}}
+    return out
+
+
+def _dump(out: dict) -> str:
+    return json.dumps(out, ensure_ascii=False, default=str)[:TOOL_TEXT_LIMIT]
 
 
 def _true(x) -> bool:
@@ -190,6 +222,8 @@ class SwarmAgent:
         n0 = len(ctx.tools.log)
         board.precomputed = self._pre_run(ctx)
         n1 = len(ctx.tools.log)
+        for t in ctx.tools.log[n0:n1]:              # 전처리 결과도 캐시에 (에이전트가 같은 조회를 다시 하지 않게)
+            board.cache[_key(t["name"], t.get("args") or {})] = t["output"]
         board.issues = {f'{i.get("type")}|{i.get("target")}': dict(i) for i in self.memory["active_issues"]}
         out = self._swarm(ctx, board, meta)
         # 비교 공정성: 에이전트가 부른 도구와 하네스 전처리를 따로 센다 (싱글은 전처리가 없다)
@@ -198,7 +232,8 @@ class SwarmAgent:
         meta["trace"] = board.trace
         meta["forced"] = board.forced
         # 해결된 쟁점은 이번에 알린 뒤 빼고, 최근 것을 남긴다 (오래된 것부터 자른다)
-        self.memory["active_issues"] = [i for i in out.get("issues", []) if i.get("status") != "해결"][-20:]
+        live = [i for i in out.get("issues", []) if i.get("status") != "해결"]
+        self.memory["active_issues"] = live[-MEMORY_CAPS["active_issues"]:]
         self.memory["last_goal"] = out.get("goal")
         return {**out, "_meta": meta}
 
@@ -207,9 +242,11 @@ class SwarmAgent:
         if ev["kind"] == "replies":
             if ev.get("fixed_answers"):
                 self.memory["fixed_answers"] = ev["fixed_answers"]
-            self.memory["qa"] = (self.memory["qa"] + [{"date": ev["feedback_date"], **q} for q in ev["qa"]])[-20:]
-            self.memory["recent_decisions"] = (self.memory["recent_decisions"]
-                                               + [{"date": ev["feedback_date"], **r} for r in ev["reactions"]])[-15:]
+            self.memory["qa"] = (self.memory["qa"]
+                                 + [{"date": ev["feedback_date"], **q} for q in ev["qa"]])[-MEMORY_CAPS["qa"]:]
+            self.memory["recent_decisions"] = (
+                self.memory["recent_decisions"]
+                + [{"date": ev["feedback_date"], **r} for r in ev["reactions"]])[-MEMORY_CAPS["recent_decisions"]:]
         meta = {"llm_calls": 0, "tool_calls": 0, "input_tokens": 0, "output_tokens": 0, "llm_seconds": 0.0,
                 "parse_errors": 0, "by_agent": {}}
         system = f"{COMMON}\n\n너는 '유저 이해(analyst)'다.\n{UNDERSTAND}"
@@ -305,6 +342,10 @@ class SwarmAgent:
                 if board.forced:                     # 이미 강제 마무리 중인데 또 넘김 → 지금 작업판으로 끝낸다
                     return self._fallback(board)
                 board.forced = limit
+                # 반려 핑퐁으로 끝난 경우: 검산이 있는 제안은 남은 부족분을 밝히고 전달한다 (P1: 처음 3주 제안 0개)
+                if bounces > MAX_BOUNCE and board.proposals and board.gap and not board.review.get("ok"):
+                    board.review = {"ok": True, "auto": True,
+                                    "reason": f"반려 한도 도달: 남은 부족분 {board.gap.get('remaining_gap', 0):,}원을 밝히고 전달"}
                 active, note = "counselor", self._force_note(active, limit)
                 continue
             board.trace.append(move)
@@ -337,7 +378,8 @@ class SwarmAgent:
             today=ctx.today, wd=WEEKDAYS[day.weekday()], kind=KIND[ctx.kind], nxt=ctx.next_feedback or "없음",
             max_q=ctx.tools.max_questions, issue_types=", ".join(ISSUE_TYPES), statuses=", ".join(STATUSES),
             actions=", ".join(ACTIONS)))
-        user = (f"[압축 유저 메모리]\n{self._memory_text()}\n[작업판]\n{json.dumps(board.view(), ensure_ascii=False, default=str)}\n"
+        user = (f"[압축 유저 메모리]\n{self._memory_text(role)}\n"
+                f"[작업판]\n{json.dumps(board.view(role), ensure_ascii=False, default=str)}\n"
                 f"[받은 바통]\n{json.dumps(note, ensure_ascii=False) if note else '없음 (네가 처음이다)'}")
         transcript: list[dict] = [{"role": "user", "text": user}]
         for _ in range(self.max_steps):
@@ -357,11 +399,32 @@ class SwarmAgent:
                 elif c.name in CONTROL[role]:
                     out = getattr(self, f"_c_{c.name}")(ctx, board, c.args or {})
                 elif c.name in DOMAIN[role]:
-                    out = ctx.tools.call(c.name, c.args or {})
+                    out = self._domain(role, ctx, board, c.name, c.args or {})
                 else:
                     out = {"ok": False, "error": f"{role} 은(는) {c.name} 을 쓸 수 없다"}
-                transcript.append({"role": "tool", "call_id": c.id, "name": c.name, "output": ctx.tools.dump(out)})
+                transcript.append({"role": "tool", "call_id": c.id, "name": c.name, "output": _dump(out)})
         return "stall", None
+
+    def _domain(self, role: str, ctx: FeedbackCtx, board: Board, name: str, args: dict) -> dict:
+        """데이터 도구 호출. 같은 조회는 캐시에서 주고, 같은 역할이 또 부르면 짧은 안내만 준다."""
+        if name == "list_transactions":            # 거래 조회는 좁게 (기본 20건, 최대 30건)
+            try:
+                lim = int(args.get("limit") or TX_LIMIT_DEFAULT)
+            except (TypeError, ValueError):
+                lim = TX_LIMIT_DEFAULT
+            args = {**args, "limit": max(1, min(lim, TX_LIMIT_MAX))}
+        if name in NO_CACHE:                        # 질문·계산은 매번 새로 (질문 한도는 ToolBox 가 센다, 계산은 싸다)
+            return ctx.tools.call(name, args)
+        key = _key(name, args)
+        if key in board.cache:
+            if role in board.seen.get(key, set()):
+                return {"ok": True, "cached": True, "note": "이번 피드백에서 이미 받은 결과다. 앞의 결과를 다시 쓰라."}
+            out = board.cache[key]
+        else:
+            out = ctx.tools.call(name, args)
+            board.cache[key] = out
+        board.seen.setdefault(key, set()).add(role)
+        return _slim(name, out)
 
     def _step(self, role: str, system: str, transcript: list[dict], specs: list[dict], meta: dict) -> Step:
         st = self._llm(role).step(system, transcript, specs)
@@ -378,6 +441,18 @@ class SwarmAgent:
     # ================================================================ 제어 도구 (결정적)
     def _known(self, ctx: FeedbackCtx) -> set[int]:
         return calculated_numbers(ctx.tools.log)
+
+    def _c_calculate_many(self, ctx, board: Board, a: dict) -> dict:
+        exprs = _list(a.get("expressions"))
+        if not exprs:
+            return {"ok": False, "error": "expressions 에 계산식을 하나 이상 넣어라."}
+        results = []
+        for e in exprs[:MAX_CALCS]:                 # 하나씩 calculate 로 돌려 log 에 남긴다 (숫자 근거·검증용)
+            r = ctx.tools.call("calculate", {"expression": e})
+            results.append({"expression": e, "result": (r.get("value") or {}).get("result"),
+                            **({"error": r["caveats"]} if r.get("status") != "ok" else {})})
+        return {"ok": True, "results": results,
+                **({"note": f"식은 {MAX_CALCS}개까지만 계산했다"} if len(exprs) > MAX_CALCS else {})}
 
     def _c_update_issue(self, ctx, board: Board, a: dict) -> dict:
         if a.get("status") not in STATUSES:
@@ -400,6 +475,8 @@ class SwarmAgent:
             return {"ok": False, "error": "saving_monthly 는 이번에 calculate·forecast_goal 로 직접 계산한 양수여야 한다. 먼저 계산하라."}
         if act == "바꾸기" and not a.get("to"):
             return {"ok": False, "error": "바꾸기는 to(무엇으로 바꿀지)를 적어야 한다."}
+        if any(p.get("target") == a.get("target") and p.get("action") == act for p in board.proposals):
+            return {"ok": False, "error": "같은 대상·행동의 제안이 이미 작업판에 있다. 다른 후보를 붙이거나 그대로 reviewer 에게 넘겨라."}
         if len(board.proposals) >= 3:
             return {"ok": False, "error": "제안은 최대 3개. drop_action 으로 하나 빼고 올려라."}
         a = {**a, "saving_monthly": saving}
@@ -457,11 +534,15 @@ class SwarmAgent:
         return {"ok": True, "out": out}
 
     # ================================================================ 메모리
-    def _memory_text(self) -> str:
+    def _memory_text(self, role: str = "analyst") -> str:
+        """역할별로 필요한 메모리만. analyst 는 전체, 나머지는 목표·보호 지출·유저 정보·최근 반응만 (쟁점은 작업판에 있다)."""
         m = self.memory
-        view = {"고정 답변": m["fixed_answers"], "유저 정보": m["profile"], "소비 패턴": m["patterns"],
-                "다음에 물을 질문": m["queued_questions"], "활성 쟁점": m["active_issues"], "지난 목표 판단": m["last_goal"],
-                "제안과 유저 반응": m["recent_decisions"], "질문과 답": m["qa"]}
+        if role == "analyst":
+            view = {"고정 답변": m["fixed_answers"], "유저 정보": m["profile"], "소비 패턴": m["patterns"],
+                    "다음에 물을 질문": m["queued_questions"], "활성 쟁점": m["active_issues"],
+                    "지난 목표 판단": m["last_goal"], "제안과 유저 반응": m["recent_decisions"], "질문과 답": m["qa"]}
+        else:
+            view = {"고정 답변": m["fixed_answers"], "유저 정보": m["profile"], "제안과 유저 반응": m["recent_decisions"]}
         return json.dumps(view, ensure_ascii=False, default=str)
 
     def _apply_understanding(self, out: dict, ref: str | None = None) -> None:
@@ -470,6 +551,6 @@ class SwarmAgent:
                 self.memory["profile"][str(u["field"])] = {"value": u.get("value"), "kind": u.get("kind"),
                                                           "evidence": u.get("evidence") or ref}   # 근거가 없으면 기록ID
         if isinstance(out.get("patterns"), list):
-            self.memory["patterns"] = [str(x) for x in out["patterns"]][:10]
+            self.memory["patterns"] = [str(x) for x in out["patterns"]][:MEMORY_CAPS["patterns"]]
         if isinstance(out.get("questions_for_next"), list):
-            self.memory["queued_questions"] = out["questions_for_next"][:5]
+            self.memory["queued_questions"] = out["questions_for_next"][:MEMORY_CAPS["queued_questions"]]

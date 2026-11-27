@@ -56,8 +56,15 @@ class Board:
     review: dict = field(default_factory=dict)            # {"ok": bool, "reason": str}
     trace: list[HandoffNote] = field(default_factory=list)
     forced: str | None = None                             # 가드가 강제로 마무리시킨 이유
+    cache: dict[str, dict] = field(default_factory=dict)  # 이번 피드백의 조회 결과 (도구+인자 → 결과)
+    seen: dict[str, set] = field(default_factory=dict)    # 그 결과를 이미 받은 역할
 
-    def view(self) -> dict:
-        return {"규칙 전처리": self.precomputed, "쟁점": list(self.issues.values()), "제안 후보": self.proposals,
-                "부족분 검산": self.gap, "리뷰": self.review, "바통 기록": self.trace[-6:],
-                **({"강제 마무리": self.forced} if self.forced else {})}
+    def view(self, role: str = "analyst") -> dict:
+        """역할마다 필요한 것만 넘긴다 (호출당 입력을 줄이려고). 전처리 전체는 analyst 만 본다."""
+        base = {"쟁점": list(self.issues.values()), "제안 후보": self.proposals, "부족분 검산": self.gap,
+                "리뷰": self.review, "바통 기록": self.trace[-4:], **({"강제 마무리": self.forced} if self.forced else {})}
+        if role == "analyst":
+            return {"규칙 전처리": self.precomputed, **base}
+        if role in ("strategist", "reviewer"):
+            return {"목표": self.precomputed.get("목표", {}), **base}
+        return base

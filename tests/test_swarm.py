@@ -350,7 +350,7 @@ def test_memory_keeps_newest_issues_and_drops_resolved():
     agent._swarm = lambda ctx, board, meta: {"issues": issues, "goal": None, "suggestions": [], "message": ""}
     agent.feedback(SimpleNamespace(fixed_answers=None, tools=SimpleNamespace(log=[])))
     kept = [i["target"] for i in agent.memory["active_issues"]]
-    assert kept == [f"x{i}" for i in range(5, 25)] and "done" not in kept
+    assert kept == [f"x{i}" for i in range(18, 25)] and "done" not in kept       # 상한 7개, 최근순
 
 
 def test_string_evidence_is_not_split():
@@ -364,3 +364,125 @@ def test_harness_tool_calls_counted_separately():
     _, fb, meta = _onboarding(c08_policy())
     assert meta["harness_tool_calls"] == 4
     assert meta["tool_calls"] == sum(1 for t in fb["tools"][4:] if t["name"] != "check_gap_coverage")
+
+
+# ------------------------------------------------------------------ 비용 줄이기 (P1 실측 338만 토큰 뒤)
+def test_calculate_many_logs_each_and_allows_proposal():
+    def policy(system, transcript, tools):
+        if not tools:
+            return _understand_reply()
+        role, outs = _role(system), tool_outputs(transcript)
+        if role == "analyst":
+            return _call("handoff_to_strategist", {"reason": "대안"})
+        if role == "strategist":
+            if not outs:
+                return _call("calculate_many", {"expressions": ["240000 - 200000", "13500 + 12800", "242400 / 10"]})
+            if len(outs) == 1:
+                vals = [r["result"] for r in outs[0]["results"]]
+                return Step(calls=[ToolCall("p1", "propose_action", {"target": "구독", "action": "해지", "saving_monthly": vals[1],
+                                                                   "text": "구독 두 개 해지"}),
+                                   ToolCall("p2", "propose_action", {"target": "주말 배달", "action": "줄이기", "per_week": 1,
+                                                                   "saving_monthly": vals[2], "text": "주 1회만"})])
+            return _call("handoff_to_reviewer", {"reason": "검증"})
+        if role == "reviewer":
+            if not outs:
+                return _call("calculate_many", {"expressions": ["240000 - 200000"]})
+            if len(outs) == 1:
+                return _call("check_gap_coverage", {"monthly_shortfall": 40000})
+            if len(outs) == 2:
+                return _call("record_review", {"ok": True, "reason": "충분"})
+            return _call("handoff_to_counselor", {"reason": "통과"})
+        return _call("respond_to_user", {"message": "두 가지를 골랐어요."})
+
+    _, fb, meta = _onboarding(policy)
+    assert [s["target"] for s in fb["output"]["suggestions"]] == ["구독", "주말 배달"]
+    assert sum(t["name"] == "calculate" for t in fb["tools"]) == 4                 # 식마다 log (숫자 근거)
+    assert meta["llm_calls"] <= 10
+
+
+def test_repeated_lookups_are_cached_per_feedback():
+    calls = []
+
+    def policy(system, transcript, tools):
+        if not tools:
+            return _understand_reply()
+        role, outs = _role(system), tool_outputs(transcript)
+        if role in ("analyst", "strategist") and len(outs) < 2:
+            calls.append(role)
+            return _call("recurring_payments", {}, i=str(len(outs)))
+        if role == "analyst":
+            assert outs[0].get("value") and outs[1].get("cached") is True        # 처음엔 결과, 같은 역할의 두 번째는 안내만
+            return _call("handoff_to_strategist", {"reason": "대안"})
+        if role == "strategist":
+            assert outs[0].get("value") and outs[1].get("cached") is True        # 다른 역할은 처음 한 번 결과를 받는다
+            return _call("handoff_to_counselor", {"reason": "제안 없음"})
+        return _call("respond_to_user", {"message": "확인했어요."})
+
+    _, fb, _ = _onboarding(policy)
+    assert sum(t["name"] == "recurring_payments" for t in fb["tools"]) == 1    # 전처리 1번만 실제로 실행
+
+
+def test_transaction_lookups_are_narrow_and_slim():
+    seen = {}
+
+    def policy(system, transcript, tools):
+        if not tools:
+            return _understand_reply()
+        role, outs = _role(system), tool_outputs(transcript)
+        if role == "analyst" and not outs:
+            return _call("list_transactions", {"limit": 100})
+        if role == "analyst":
+            seen.update(outs[0])
+            return _call("handoff_to_counselor", {"reason": "끝"})
+        return _call("respond_to_user", {"message": "확인했어요."})
+
+    _, fb, _ = _onboarding(policy)
+    rows = seen["value"]["rows"]
+    assert len(rows) == 30 and set(rows[0]) == {"거래ID", "날짜", "내용", "금액", "소분류"}
+    full = next(t for t in fb["tools"] if t["name"] == "list_transactions")["output"]["value"]["rows"][0]
+    assert "결제수단" in full                                                   # log 에는 원본 그대로
+
+
+def test_bounce_limit_delivers_checked_proposals_with_gap():
+    def policy(system, transcript, tools):
+        if not tools:
+            return _understand_reply()
+        role, outs = _role(system), tool_outputs(transcript)
+        if role == "analyst":
+            return _call("handoff_to_strategist", {"reason": "대안"})
+        if role == "strategist":
+            if not outs:
+                return _call("calculate_many", {"expressions": ["13500 + 12800", "240000 - 200000"]})
+            if len(outs) == 1:
+                return _call("propose_action", {"target": "구독", "action": "해지", "saving_monthly": 26300, "text": "구독 해지"})
+            return _call("handoff_to_reviewer", {"reason": "검증"})
+        if role == "reviewer":
+            if not outs:
+                return _call("calculate_many", {"expressions": ["240000 - 200000"]})
+            if len(outs) == 1:
+                return _call("check_gap_coverage", {"monthly_shortfall": 40000})
+            if len(outs) == 2:
+                return _call("record_review", {"ok": False, "reason": "부족"})
+            return _call("handoff_to_strategist", {"reason": "반려"})
+        return _call("respond_to_user", {"message": "구독부터 정리해 봐요. 남은 부족분은 다음에 같이 봐요."})
+
+    _, fb, meta = _onboarding(policy)
+    assert "반려" in meta["forced"]
+    assert [s["target"] for s in fb["output"]["suggestions"]] == ["구독"]       # 핑퐁으로 끝나도 검산한 제안은 나간다
+
+
+def test_counselor_sees_slim_memory_and_board():
+    prompts = {}
+
+    def policy(system, transcript, tools):
+        if not tools:
+            return _understand_reply()
+        role = _role(system)
+        prompts.setdefault(role, transcript[0]["text"])
+        if role == "analyst":
+            return _call("handoff_to_counselor", {"reason": "끝"})
+        return _call("respond_to_user", {"message": "확인했어요."})
+
+    _onboarding(policy)
+    assert "규칙 전처리" in prompts["analyst"] and "규칙 전처리" not in prompts["counselor"]
+    assert len(prompts["counselor"]) < len(prompts["analyst"])
