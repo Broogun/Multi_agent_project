@@ -413,7 +413,7 @@ constraints = ["씨네박스는 유지 (보호)"]
 [[problems]]
 id = "delivery"
 side = "지출"
-title = "주말 배달 (지출 지렛대 중 가장 큼)"
+title = "주말 배달 (절약 후보 중 가장 큼)"
 lever = { kind = "spend", category = "배달" }
 facts = ["H6"]
 constraints = ["H6: 주말 하루는 편하게 쉬고 싶다"]

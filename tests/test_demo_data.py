@@ -235,7 +235,7 @@ def test_p4_story():
 
 
 def test_p4_problems_are_tangled():
-    """지출 지렛대는 하나하나도, 다 합쳐도 필요 월 저축액에 못 미친다 → 수입·목표 쪽까지 함께 봐야 한다."""
+    """절약 후보는 하나하나도, 다 합쳐도 필요 월 저축액에 못 미친다 → 수입·목표 쪽까지 함께 봐야 한다."""
     facts = _world("P4").truth["facts"]
     required, levers = facts["goal"]["monthly_required"], facts["levers"]
     assert facts["goal"]["months_left"] == 3
