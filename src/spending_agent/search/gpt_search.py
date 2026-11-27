@@ -26,6 +26,13 @@ VIEW_PARAMS = {"type"}            # 화면 전환용 파라미터 (같은 페이
 # 파일·첨부는 요금제 안내가 아니라 뺀다
 FILE_HINTS = ("download", "/attach/", "/upload/")
 FILE_EXTS = (".pdf", ".hwp", ".hwpx", ".zip", ".xlsx", ".xls", ".doc", ".docx", ".ppt", ".pptx")
+# 경로 허용 목록: 도메인 전체가 아니라 요금제 안내 경로만 통과시킨다 (FAQ·보도자료·이벤트 제외).
+# 실제 스모크에서 본 경로만 넣었다. 규칙이 없는 도메인은 경로에 요금제 단서가 있을 때만 통과.
+PATH_RULES: dict[str, tuple[str, ...]] = {
+    "smartchoice.or.kr": ("/smc/plan/",),
+    "kt.com": ("/wdic/productdetail", "/wdic/index"),
+}
+PLAN_HINTS = ("plan", "charge", "rate", "fee", "product", "요금")
 # 페이지를 열 수 없어서, 제목이 없을 때는 주소 경로로 이름을 붙인다 (경로 이름 기반, 확인된 페이지 제목이 아님)
 SITE_NAMES = {"smartchoice.or.kr": "스마트초이스", "kt.com": "KT", "sktelecom.com": "SKT", "lguplus.com": "LG U+"}
 PATH_LABELS = (("plancompare", "요금제 비교"), ("catalog", "요금제 목록"), ("recomend_search", "맞춤 요금제 찾기"),
@@ -77,6 +84,17 @@ def is_file_or_landing(url: str) -> bool:
     return len(segs) <= 1 and not sp.query and (not segs or sp.path.endswith("/"))   # 홈 · 첫 화면 (/, /smc/)
 
 
+def path_allowed(url: str, rules: dict[str, tuple[str, ...]] | None = None) -> bool:
+    """도메인별 경로 규칙이 있으면 그 경로만, 없으면 요금제 단서가 있는 경로만 통과."""
+    rules = PATH_RULES if rules is None else rules
+    h = _host(url)
+    path = urlsplit(url).path.lower()
+    for d, prefixes in rules.items():
+        if h == d or h.endswith("." + d):
+            return any(path.startswith(x) or x in path for x in prefixes)
+    return any(k in path for k in PLAN_HINTS)
+
+
 def label_for(url: str, allowed: list[str]) -> str:
     h = _host(url)
     site = next((SITE_NAMES.get(d, d) for d in allowed if h == d or h.endswith("." + d)), h)
@@ -91,7 +109,8 @@ def in_allowed(url: str, allowed: list[str]) -> bool:
     return any(h == d or h.endswith("." + d) for d in allowed)
 
 
-def filter_sources(raw: list[dict], allowed: list[str], official: set[str] | None = None) -> list[SearchSource]:
+def filter_sources(raw: list[dict], allowed: list[str], official: set[str] | None = None,
+                   path_rules: dict[str, tuple[str, ...]] | None = None) -> list[SearchSource]:
     """표시 전 필터. raw: [{"url", "title"}]. 순서는 공식 먼저, 그다음 원래 순서."""
     official = official or set()
     titles: dict[str, str] = {}               # 같은 페이지에 제목이 있는 출처가 있으면 그 제목을 쓴다
@@ -106,7 +125,7 @@ def filter_sources(raw: list[dict], allowed: list[str], official: set[str] | Non
         if not url.startswith(("http://", "https://")) or not in_allowed(url, allowed):
             continue
         u = clean_url(url)
-        if is_file_or_landing(u):
+        if is_file_or_landing(u) or not path_allowed(u, path_rules):
             continue
         key = page_key(u)                    # m.·www.·api.·type=m 만 다른 주소는 같은 페이지
         if key in seen:

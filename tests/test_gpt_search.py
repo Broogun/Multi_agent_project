@@ -14,6 +14,7 @@ from spending_agent.search.gpt_search import (
     in_allowed,
     is_file_or_landing,
     page_key,
+    path_allowed,
 )
 
 ALLOWED = ["smartchoice.or.kr", "kt.com"]
@@ -32,12 +33,12 @@ class FakeClient:
 def _resp():
     return NS(output=[
         NS(type="web_search_call", action=NS(sources=[
-            NS(url="https://www.smartchoice.or.kr/plan?id=1&utm_source=openai", title="요금제 비교"),
+            NS(url="https://www.smartchoice.or.kr/smc/plan/planCompare.do?id=1&utm_source=openai", title="요금제 비교"),
             NS(url="https://blog.example.com/cheap-plan", title="블로그"),        # 허용 밖
         ])),
         NS(type="message", content=[NS(text="이 요금제는 월 9,900원입니다.", annotations=[
-            NS(type="url_citation", url="https://shop.kt.com/plan#top", title="KT 요금제"),
-            NS(type="url_citation", url="https://smartchoice.or.kr/plan?id=1", title="중복"),
+            NS(type="url_citation", url="https://product.kt.com/wDic/productDetail.do?ItemCode=7#top", title="KT 요금제"),
+            NS(type="url_citation", url="https://smartchoice.or.kr/smc/plan/planCompare.do?id=1", title="중복"),
         ])]),
     ])
 
@@ -54,7 +55,8 @@ def test_allowed_includes_subdomains_only():
 def test_filter_drops_outside_dedups_and_puts_official_first():
     raw = extract_sources(_resp())
     out = filter_sources(raw, ALLOWED, official={"smartchoice.or.kr"})
-    assert [s["uri"] for s in out] == ["https://www.smartchoice.or.kr/plan?id=1", "https://shop.kt.com/plan"]
+    assert [s["uri"] for s in out] == ["https://www.smartchoice.or.kr/smc/plan/planCompare.do?id=1",
+                                       "https://product.kt.com/wDic/productDetail.do?ItemCode=7"]
     assert all("blog" not in s["uri"] for s in out)
 
 
@@ -98,6 +100,16 @@ def test_titles_from_citation_or_path_label():
     raw = [{"url": "https://m.smartchoice.or.kr/smc/plan/planCompare.do", "title": ""},
            {"url": "https://smartchoice.or.kr/smc/plan/planCompare.do", "title": "요금제 비교 검색"},
            {"url": "https://product.kt.com/wDic/productDetail.do?ItemCode=1", "title": ""},
-           {"url": "https://kt.com/some/thing/x.do", "title": "https://kt.com/some"}]
+           {"url": "https://product.kt.com/wDic/index.do?CateCode=1", "title": "https://kt.com/some"}]
     out = filter_sources(raw, ALLOWED)
     assert [s["title"] for s in out] == ["요금제 비교 검색", "KT 상품 상세", "KT 페이지"]
+
+
+def test_path_allow_list_keeps_plan_pages_only():
+    ok = ["https://m.smartchoice.or.kr/smc/plan/planCompare.do", "https://product.kt.com/wDic/productDetail.do?ItemCode=1",
+          "https://www.lguplus.com/mobile/plan/mplan/5g-all"]
+    bad = ["https://api.smartchoice.or.kr/smc/support/faq.do?tab=B", "https://ermsweb.kt.com/mobile/faq/faqSeg13_1.do",
+           "https://m.lguplus.com/about/en/corporation/promotion/press-kit/detail?atclNo=1",
+           "https://www.lguplus.com/benefit-event/ongoing/82173"]
+    assert all(path_allowed(u) for u in ok)
+    assert not any(path_allowed(u) for u in bad)
