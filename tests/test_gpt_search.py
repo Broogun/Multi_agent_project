@@ -75,13 +75,13 @@ def test_panel_shows_links_only_not_model_text():
 
 
 def test_empty_result_message():
-    ev = GPTSearch(model="m", client=FakeClient(NS(output=[]))).panel("q", ALLOWED)
+    ev = GPTSearch(model="m", client=FakeClient(NS(output=[]))).panel("알뜰폰 요금제", ALLOWED)
     assert ev["sources"] == [] and ev["text"] == EMPTY_TEXT
 
 
 def test_requires_allowed_domains():
     with pytest.raises(ValueError):
-        GPTSearch(model="m", client=FakeClient(NS(output=[]))).panel("q", [])
+        GPTSearch(model="m", client=FakeClient(NS(output=[]))).panel("알뜰폰 요금제", [])
 
 
 def test_same_page_on_mobile_api_hosts_is_one_link():
@@ -148,7 +148,7 @@ def test_pinned_first_and_same_page_not_repeated():
         NS(url="https://www.sk7mobile.com/prod/data/callingPlanList.do?refCode=USIM", title="SK7 유심 요금제"),
     ]))])
     allowed = ["smartchoice.or.kr", "mvnohub.kr", "sk7mobile.com"]
-    ev = GPTSearch(model="m", client=FakeClient(resp)).panel("q", allowed, topic="mobile_plan")
+    ev = GPTSearch(model="m", client=FakeClient(resp)).panel("알뜰폰 요금제", allowed, topic="mobile_plan")
     assert [x["title"] for x in ev["sources"]] == ["스마트초이스 요금제 비교", "알뜰폰허브 요금제 목록", "SK7 유심 요금제"]
 
 
@@ -184,7 +184,7 @@ def test_query_guard_strips_pii_and_rejects_money():
 
 
 def test_pinned_links_respect_allowlist():
-    ev = GPTSearch(model="m", client=FakeClient(NS(output=[]))).panel("q", ["sk7mobile.com"], topic="mobile_plan")
+    ev = GPTSearch(model="m", client=FakeClient(NS(output=[]))).panel("알뜰폰 요금제", ["sk7mobile.com"], topic="mobile_plan")
     assert ev["sources"] == []
 
 
@@ -193,7 +193,7 @@ def test_page_opening_result_is_rejected():
                       NS(type="web_search_call", action=NS(type="open_page", url="https://kt.com/x"))])
     g = GPTSearch(model="m", client=FakeClient(resp))
     with pytest.raises(RuntimeError):
-        g.panel("q", ALLOWED)
+        g.panel("알뜰폰 요금제", ALLOWED)
     assert g.last_actions == ["search", "open_page"]
 
 
@@ -215,7 +215,7 @@ def test_pinned_counts_toward_site_cap_and_subdomain_pages_merge():
         NS(url="https://www2.uplusumobile.com/product/pric/usim/pricList", title=""),
     ]))])
     allowed = ["smartchoice.or.kr", "mvnohub.kr", "uplusumobile.com"]
-    ev = GPTSearch(model="m", client=FakeClient(resp)).panel("q", allowed, topic="mobile_plan")
+    ev = GPTSearch(model="m", client=FakeClient(resp)).panel("알뜰폰 요금제", allowed, topic="mobile_plan")
     titles = [x["title"] for x in ev["sources"]]
     assert titles == ["스마트초이스 요금제 비교", "알뜰폰허브 요금제 목록", "알뜰폰허브 요금제 상세", "U+ 목록",
                       "알뜰폰허브 요금제 상세"]                       # 마지막은 상한으로 접힌 링크 (뒤에 붙음)
@@ -241,9 +241,9 @@ def test_query_guard_catches_more_pii_and_money():
 def test_overflow_links_are_kept_for_more_view():
     raw = [NS(url=f"https://www.sk7mobile.com/prod/data/callingPlanView.do?prodCd=PD{i}", title=f"SK7 {i}") for i in range(4)]
     g = GPTSearch(model="m", client=FakeClient(NS(output=[NS(type="web_search_call", action=NS(sources=raw))])))
-    ev = g.panel("q", ["sk7mobile.com"])
+    ev = g.panel("알뜰폰 요금제", ["sk7mobile.com"])
     assert [x["title"] for x in ev["sources"]] == ["SK7 0", "SK7 1", "SK7 2", "SK7 3"]   # 숨기지 않고 뒤에
-    assert g.last_shown == 2 and [x["title"] for x in g.last_more] == ["SK7 2", "SK7 3"]
+    assert g.last_shown == 2 and g.last_more_count == 2 and not hasattr(g, "last_more")   # 링크는 객체에 남기지 않음
 
 
 def test_bare_numbers_rejected_spec_numbers_kept():
@@ -264,3 +264,23 @@ def test_expired_marker_survives_shortening():
     out = filter_sources([{"url": "https://www.sk7mobile.com/prod/data/callingPlanView.do?prodCd=PD1",
                            "title": "LTE 유심 요금제 아주 긴 이름의 프로모션 상품 안내 페이지 (판매종료)"}], ["sk7mobile.com"])
     assert out[0]["title"].startswith("[확인 필요]") and len(out[0]["title"]) <= 40
+
+
+def test_free_text_is_rejected():
+    for bad in ["김민수 서울 강남구 요금제 월 10GB", "현재 통신비 오만원 요금제", "q"]:
+        with pytest.raises(ValueError):
+            safe_query(bad)
+
+
+def test_plan_spec_queries_pass_the_guard():
+    from spending_agent.search.plan_spec import build_search_request
+    for a in [{"activities": ["video"], "outside": "gt3h", "wifi": "rarely", "heavy_calls": True, "tethering": True},
+              {"activities": ["music"], "outside": "1h"}, {"measured_gb_monthly": 7}]:
+        req = build_search_request(a)
+        assert safe_query(req["query"]) == req["query"]
+
+
+def test_expiry_from_any_duplicate_title_is_kept():
+    u = "https://www.sk7mobile.com/prod/data/callingPlanView.do?prodCd=PD1"
+    out = filter_sources([{"url": u, "title": "LTE 유심"}, {"url": u, "title": "LTE 유심 (판매종료)"}], ["sk7mobile.com"])
+    assert out[0]["title"] == "[확인 필요] LTE 유심"
