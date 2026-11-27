@@ -317,6 +317,18 @@ topic = "12월 말 게임 결제가 잦음"
 fact = "겨울 이벤트라 평소보다 많이 질렀다. 3만 원 상한을 넘긴 줄은 몰랐다."
 answer = "겨울 이벤트라 좀 질렀어요... 3만 원 넘었어요?"
 
+[[hidden_facts]]
+id = "H9"
+topic = "편의점 소액 (11월부터 증가)"
+fact = "공강·쉬는 시간에 습관처럼 들러 음료나 과자를 산다. 일주일에 한두 번은 안 가도 된다."
+answer = "공강 때 그냥 들르게 돼요. 일주일에 한두 번은 안 가도 될 것 같아요."
+
+[[hidden_facts]]
+id = "H10"
+topic = "여행비 먼저 떼어 두기"
+fact = "알바비 들어오는 날 5만 원 정도는 여행비로 먼저 떼어 둘 수 있다. 그 이상은 한 달 생활이 빠듯하다."
+answer = "알바비 받는 날 5만 원 정도는 따로 둘 수 있을 것 같아요."
+
 # ---------------------------------------------------------------- 얽힌 문제
 [[problems]]
 id = "cafe_habit"
@@ -456,6 +468,85 @@ prob = 0.3
 delay_days = [1, 1]
 hours = [11, 22]
 texts = ["어제 친구들이랑 {amount}원", "모임 {amount}원"]
+
+# ---------------------------------------------------------------- 반응 규칙 (서비스 있음 세계, docs/10 §4, 초안)
+# 피드백의 제안(대상·행동·강도)에 반응한다. 기준 세계에는 쓰이지 않는다. 형식: spending_agent.demo.responses, 예시는 P1.toml
+# 규칙에 없는 대상·행동은 '보류'로 아무것도 바뀌지 않는다.
+# 수락: 커피만 사는 날 저가 테이크아웃(H4), 시험기간 밖 카페 주 1회 줄이기(H1), 편의점 줄이기(H9), 게임 월 상한(H3),
+# 알바비 날 여행비 떼어 두기(H10). 거절: 시험기간 카페·카페 끊기(보호), 집커피(H4), 여행 예약(H7).
+[[responses]]
+id = "cafe"
+target = { merchants = ["cafe_a", "cafe_b", "cafe_c"], words = ["카페", "커피"] }
+facts = ["H1", "H2", "H4"]
+accept = [
+  # 커피만 사는 날은 학교 앞 저가 테이크아웃. 공부하러 가는 날은 그대로라 평균 가격이 40% 내려간다고 본다 (가정)
+  { action = "바꾸기", to = ["테이크아웃", "저가"], effect = { habit = "cafe", price = 0.6 } },
+  # 시험기간이 아니면 도서관에서 공부할 수 있다 (H1): 주 1회까지
+  { action = "줄이기", max_per_week = 1, effect = { habit = "cafe" }, hold_days = 28, keep_after = 0.5 },
+]
+reject = [
+  { action = "줄이기", during = [2026-12-07, 2026-12-18], protected = true, why = "보호 지출: 기말고사 기간이라 공부할 곳이 필요하다 (H2)" },
+  { action = "끊기", protected = true, why = "보호 지출: 집에선 동생 때문에 공부가 안 된다 (H1)" },
+  { action = "바꾸기", to = ["집", "캡슐", "드립", "홈카페", "텀블러"], why = "H4: 캡슐머신이 없고 드립은 귀찮다" },
+  { action = "줄이기", why = "H1: 일주일에 한 번 넘게 줄이면 공부할 곳이 없다" },
+]
+
+[[responses]]
+id = "convenience"
+target = { merchants = ["conv_a", "conv_b"], words = ["편의점"] }
+facts = ["H9"]
+accept = [{ action = "줄이기", max_per_week = 2 }]
+reject = [
+  { action = "줄이기", why = "H9: 일주일에 한두 번까지만 줄일 수 있다" },
+  { action = "끊기", why = "H9: 공강 때 잠깐 들르는 건 계속한다" },
+]
+effect = { habit = "conv" }
+hold_days = 21
+keep_after = 0.5
+
+[[responses]]
+id = "game"
+target = { merchants = ["game"], words = ["게임"] }
+facts = ["H3", "H8"]
+accept = [{ action = "상한 정하기", min_amount = 20000, max_amount = 30000 }]
+reject = [
+  { action = "상한 정하기", why = "H3: 한 달 3만 원으로 정해 두었다. 친구들과 하는 이벤트 때는 조금 쓴다" },
+  { action = "끊기", why = "H3: 친구들과 같이 하는 게임이다" },
+  { action = "해지", why = "H3: 친구들과 같이 하는 게임이다" },
+]
+effect = { cap = "게임" }   # 그달 게임 결제가 상한을 넘기면 그 결제는 안 한다 (12월 말 이벤트 결제 포함)
+
+[[responses]]
+id = "travel_fund"
+target = { words = ["여행비", "여행 자금", "여행 목표", "저축", "떼어"] }
+facts = ["H5", "H10"]
+accept = [{ action = "저축 늘리기", max_amount = 50000 }]
+reject = [{ action = "저축 늘리기", why = "H10: 5만 원 넘게 떼면 한 달 생활이 빠듯하다" }]
+effect = { new_monthly = "travel_saving", day = 5, category = "저축", hours = [20, 22] }   # 알바비(15~19시) 들어온 뒤 자동이체. 내 돈의 이동이라 절약액에는 안 잡힌다
+
+[[responses]]
+id = "trip_booking"
+target = { merchants = ["trip"], words = ["여행 예약"] }
+facts = ["H7"]
+reject = [{ action = "*", why = "H7: 여행 목표로 모은 돈에서 낸 숙소·기차 예약이다" }]
+
+# ---------------------------------------------------------------- 자기 기록 효과 (앱만 써도 생기는 변화, docs/10 §3, 크기는 가정)
+# ratio 는 '중간' 크기다. 평가에서는 크기 배율(없음 0 · 작게 0.5 · 중간 1)을 바꿔 가며 LLM 순위가 같은지 본다.
+[[self_effects]]
+id = "pcroom_records"
+trigger = { records = ["PC방"], count = 3, window_days = 14 }
+effect = { habits = ["pcroom"], ratio = 0.2 }
+hold_days = 14
+keep_after = 0.0
+why = "방학에 PC방을 자주 기록하다 보면 스스로 의식하게 된다"
+
+[[self_effects]]
+id = "goal_behind"
+trigger = { goal_behind = true }
+effect = { habits = ["conv", "pcroom", "cafe"], ratio = 0.1 }
+hold_days = 31
+keep_after = 0.0
+why = "말일에 앱에서 여행비 목표에 못 미친 것을 보면 다음 달 군것질·PC방·카페를 조금 아낀다"
 
 # ---------------------------------------------------------------- 평가 케이스
 [[cases]]

@@ -401,6 +401,12 @@ topic = "1/16 10만 원 출금"
 fact = "대학 동기 결혼식 축의금. 자주 있는 일은 아니다."
 answer = "대학 동기 결혼식 축의금이에요."
 
+[[hidden_facts]]
+id = "H10"
+topic = "여행 적금 금액 늘리기"
+fact = "적금을 조금 늘리는 건 괜찮다. 월 5만 원 넘게 늘리면 생활비가 빠듯하다."
+answer = "조금은 더 넣을 수 있어요. 5만 원 넘게는 좀 빠듯해요."
+
 # ---------------------------------------------------------------- 얽힌 문제
 [[problems]]
 id = "subscriptions"
@@ -523,6 +529,110 @@ prob = 0.2
 delay_days = [1, 1]
 hours = [8, 10]
 texts = ["어제 {merchant} {amount}원", "{merchant} {amount}원. 또 밖에서 먹음"]
+
+# ---------------------------------------------------------------- 반응 규칙 (서비스 있음 세계, docs/10 §4, 초안)
+# 피드백의 제안(대상·행동·강도)에 반응한다. 기준 세계(서비스 없음)에는 쓰이지 않는다. 형식: spending_agent.demo.responses
+# 규칙에 없는 대상·행동(예: 구름드라이브 해지, 옷장마켓 줄이기, 외식 줄이기)은 '보류'로 아무것도 바뀌지 않는다.
+# 수락: 해지할 만한 구독 3개(월 26,300원), 주말 배달 줄이기, 적금 늘리기. 거절: 보호 지출과 숨은 사실에 걸리는 제안.
+[[responses]]
+id = "cancel_movieon"
+target = { merchants = ["ott_a"] }
+facts = ["H2"]
+accept = [{ action = "해지" }]
+effect = { monthly = "ott_a", change = "stop" }
+
+[[responses]]
+id = "cancel_sorirang"
+target = { merchants = ["music_a"] }
+facts = ["H3"]
+accept = [{ action = "해지" }]
+effect = { monthly = "music_a", change = "stop" }
+
+[[responses]]
+id = "cancel_webtoon"
+target = { merchants = ["webtoon"] }
+facts = ["H4"]
+accept = [{ action = "해지" }]
+effect = { monthly = "webtoon", change = "stop" }
+
+[[responses]]
+id = "keep_cinebox"
+target = { merchants = ["ott_b"] }
+protected = true         # 고정 답변의 지키고 싶은 소비
+facts = ["H2"]
+reject = [{ action = "*", why = "보호 지출: 보는 드라마가 있어서 계속 쓴다" }]
+
+[[responses]]
+id = "keep_melody"
+target = { merchants = ["music_b"] }
+facts = ["H3"]
+reject = [{ action = "*", why = "H3: 지금 쓰는 음악 앱이다 (옮겨 간 쪽)" }]
+
+[[responses]]
+id = "delivery"
+target = { merchants = ["delivery"], words = ["배달"] }
+facts = ["H6"]
+accept = [{ action = "줄이기", max_per_week = 1 }]   # H6: 토요일 저녁 한 번 정도 = 주 1회 (주간 1.87회 → 0.87회)
+reject = [
+  { action = "줄이기", why = "H6: 일주일에 한 번 정도까지만 줄일 수 있다" },
+  { action = "끊기", why = "H6: 평일에 지쳐서 주말엔 요리하기 싫다" },
+  { action = "바꾸기", why = "H6: 주말엔 요리하기 싫다 (집밥·도시락으로 바꾸기)" },
+]
+effect = { habit = "delivery" }   # 주 n회 줄임 = 빈도 × (1 − n / 주간 빈도)
+start_days = 1
+hold_days = 21
+keep_after = 0.5         # 3주 뒤에는 줄인 폭의 절반만 남는다 (재발)
+
+[[responses]]
+id = "saving_up"
+target = { words = ["적금", "저축"] }
+facts = ["H5", "H10"]
+accept = [{ action = "저축 늘리기", max_amount = 50000 }]
+reject = [{ action = "저축 늘리기", why = "H10: 월 5만 원 넘게 늘리면 생활비가 빠듯하다" }]
+effect = { monthly = "saving", change = "add" }   # 저축 이체는 내 돈의 이동이라 절약액에는 안 잡힌다
+
+[[responses]]
+id = "keep_family_phone"
+target = { merchants = ["phone"] }
+facts = ["H1"]
+reject = [{ action = "*", why = "H1: 가족결합 대표 결제라 내 몫은 1/4이다. 요금제는 가족과 같이 정한다" }]
+
+[[responses]]
+id = "keep_insurance"
+target = { merchants = ["insurance"] }
+facts = ["H8"]
+reject = [{ action = "*", why = "H8: 갱신형이라 오른 것. 보험은 유지한다" }]
+
+[[responses]]
+id = "yearend_pub"
+target = { merchants = ["pub"] }
+facts = ["H7"]
+reject = [{ action = "끊기", why = "H7: 연말 송년회·약속은 빠지기 어렵다" }]
+
+[[responses]]
+id = "wedding_gift"
+target = { words = ["축의금", "경조사"] }
+facts = ["H9"]
+reject = [{ action = "*", why = "H9: 대학 동기 결혼식 축의금. 줄일 지출이 아니다" }]
+
+# ---------------------------------------------------------------- 자기 기록 효과 (앱만 써도 생기는 변화, docs/10 §3, 크기는 가정)
+# 피드백의 제안과 상관없이, 기록하고 목표를 확인하는 것만으로 생기는 변화. ② 앱만 / ③ 앱 + 피드백 세계에 같이 들어간다.
+# ratio 는 '중간' 크기다. 평가에서는 크기 배율(없음 0 · 작게 0.5 · 중간 1)을 바꿔 가며 LLM 순위가 같은지 본다.
+[[self_effects]]
+id = "delivery_records"
+trigger = { records = ["배달"], count = 3, window_days = 14 }
+effect = { habits = ["delivery"], ratio = 0.2 }
+hold_days = 14
+keep_after = 0.0         # 2주 지나면 원래대로
+why = "배달을 자주 기록하다 보면 스스로 의식하게 된다 (R3 '여행 가려면 좀 줄여야 하나')"
+
+[[self_effects]]
+id = "goal_behind"
+trigger = { goal_behind = true }
+effect = { habits = ["delivery", "brunch", "conv"], ratio = 0.1 }
+hold_days = 31
+keep_after = 0.0
+why = "말일에 앱에서 이번 달 목표에 못 미친 것을 보면 다음 달 군것질·외식을 조금 아낀다"
 
 # ---------------------------------------------------------------- 평가 케이스
 [[cases]]

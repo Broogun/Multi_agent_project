@@ -357,6 +357,12 @@ topic = "12월 하순 출금·가족 외식"
 fact = "연말이라 결혼식이 두 번 있었고, 크리스마스 가족 외식은 내가 냈다. 매달 있는 일은 아니다."
 answer = "연말이라 결혼식이 두 번 있었고, 크리스마스엔 제가 가족 외식을 냈어요."
 
+[[hidden_facts]]
+id = "H10"
+topic = "야근 날 저녁 배달"
+fact = "야근하는 날 저녁은 회사에서 배달로 때운다. 2주에 한 번 정도는 집에서 도시락을 싸 갈 수 있다."
+answer = "야근하면 그냥 시켜 먹어요. 2주에 한 번 정도는 도시락 싸 갈 수 있을 것 같아요."
+
 # ---------------------------------------------------------------- 얽힌 문제
 [[problems]]
 id = "taxi"
@@ -480,6 +486,85 @@ prob = 0.3
 delay_days = [1, 1]
 hours = [7, 9]
 texts = ["야근하고 배달 {amount}원", "저녁 배달"]
+
+# ---------------------------------------------------------------- 반응 규칙 (서비스 있음 세계, docs/10 §4, 초안)
+# 피드백의 제안(대상·행동·강도)에 반응한다. 기준 세계에는 쓰이지 않는다. 형식: spending_agent.demo.responses, 예시는 P1.toml
+# 규칙에 없는 대상·행동은 '보류'로 아무것도 바뀌지 않는다.
+# 수락: 23시 이후 택시비 경비 청구(H1), 야근 날 배달 2주에 한 번 줄이기(H10), 약정 끝난 뒤 요금제 바꾸기(H4).
+# 거절: 택시 줄이기(막차 뒤 안전), PT(보호), 구름드라이브(H6), 부모님 생활비(H2), 경조사·연말 가족 외식(H7·H9).
+[[responses]]
+id = "taxi"
+target = { merchants = ["taxi"], words = ["택시"] }
+facts = ["H1"]
+accept = [{ action = "경비 청구" }]
+reject = [{ action = "*", why = "H1: 광역버스 막차가 22:40이라 야근하면 택시밖에 없다" }]
+# 23시 이후 택시비를 모아 다음 달 10일(월급날)에 돌려받는다. 입금 표시는 데모 값
+effect = { reimburse = "taxi", after_hour = 23, pay_day = 10, export = { desc = "경비정산", category = ["수입", "미분류"] } }
+
+[[responses]]
+id = "delivery"
+target = { merchants = ["delivery"], words = ["배달"] }
+facts = ["H10"]
+accept = [{ action = "줄이기", max_per_week = 0.5 }]
+reject = [
+  { action = "줄이기", why = "H10: 2주에 한 번 정도까지만 도시락을 싸 갈 수 있다" },
+  { action = "끊기", why = "H10: 야근하는 날은 저녁을 먹어야 한다" },
+]
+effect = { habit = "delivery" }
+hold_days = 28
+keep_after = 0.5
+
+[[responses]]
+id = "phone_plan"
+target = { merchants = ["phone"], words = ["휴대폰", "요금제", "통신비"] }
+facts = ["H4", "H8"]
+accept = [{ action = "바꾸기", to = ["요금제", "알뜰", "데이터"] }]
+reject = [{ action = "해지", why = "H4: 휴대폰은 계속 써야 한다" }]
+effect = { monthly = "phone", change = "set", amount = 39000 }   # 데이터가 적은 요금제 (데모 값, 실제 요금 아님)
+not_before = 2026-12-21  # 약정이 12/20에 끝난 뒤에 바꾼다 (H4)
+
+[[responses]]
+id = "keep_pt"
+target = { merchants = ["pt"], words = ["PT"] }
+protected = true         # 고정 답변의 지키고 싶은 소비
+facts = ["H5"]
+reject = [{ action = "*", why = "보호 지출: 허리 때문에 PT는 계속한다" }]
+
+[[responses]]
+id = "keep_cloud"
+target = { merchants = ["cloud_pro"] }
+facts = ["H6"]
+reject = [{ action = "*", why = "H6: 사진 백업용으로 계속 쓴다 (연간 결제)" }]
+
+[[responses]]
+id = "keep_living"
+target = { words = ["생활비"] }
+facts = ["H2"]
+reject = [{ action = "*", why = "H2: 본가에 사는 대신 부모님께 드리는 생활비다" }]
+
+[[responses]]
+id = "family_events"
+target = { merchants = ["dinner"], words = ["경조사", "축의금", "조의금", "가족 외식"] }
+facts = ["H7", "H9"]
+reject = [{ action = "*", why = "H7·H9: 경조사와 연말 가족 외식은 줄일 지출이 아니다" }]
+
+# ---------------------------------------------------------------- 자기 기록 효과 (앱만 써도 생기는 변화, docs/10 §3, 크기는 가정)
+# ratio 는 '중간' 크기다. 평가에서는 크기 배율(없음 0 · 작게 0.5 · 중간 1)을 바꿔 가며 LLM 순위가 같은지 본다.
+[[self_effects]]
+id = "delivery_records"
+trigger = { records = ["배달"], count = 3, window_days = 14 }
+effect = { habits = ["delivery"], ratio = 0.2 }
+hold_days = 14
+keep_after = 0.0
+why = "야근 날 배달을 자주 기록하다 보면 스스로 의식하게 된다 (택시는 대안이 없어 바뀌지 않는다)"
+
+[[self_effects]]
+id = "goal_behind"
+trigger = { goal_behind = true }
+effect = { habits = ["delivery", "cafe", "conv"], ratio = 0.1 }
+hold_days = 31
+keep_after = 0.0
+why = "말일에 앱에서 전세 목표에 못 미친 것을 보면 다음 달 배달·커피·군것질을 조금 아낀다"
 
 # ---------------------------------------------------------------- 평가 케이스
 [[cases]]
