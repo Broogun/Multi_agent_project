@@ -147,3 +147,19 @@ def test_pinned_first_and_same_page_not_repeated():
     allowed = ["smartchoice.or.kr", "mvnohub.kr", "sk7mobile.com"]
     ev = GPTSearch(model="m", client=FakeClient(resp)).panel("q", allowed, topic="mobile_plan")
     assert [x["title"] for x in ev["sources"]] == ["스마트초이스 요금제 비교", "알뜰폰허브 요금제 목록", "SK7 유심 요금제"]
+
+
+def test_hellomobile_and_moyo_links_only_plan_pages():
+    ok = ["https://direct.lghellovision.net/rate/rateViewUsim.do", "https://direct.lghellovision.net/esim/everythingEsim.do?idx=1",
+          "https://www.moyoplan.com/plans/18763", "https://www.moyoplan.com/calculator/plans-by-data/recommended-one?data=15"]
+    bad = ["https://direct.lghellovision.net/event/viewEventDetailGuest.do?idxOfEvent=586",
+           "https://direct.lghellovision.net/mgm/rcmndmbr.do?pcode=1",
+           "https://www.moyoplan.com/community/questions/690c92d1/x", "https://www.moyoplan.com/tips/how_to_use",
+           "https://www.moyoplan.com/gift-group/2205"]
+    assert all(path_allowed(u) for u in ok) and not any(path_allowed(u) for u in bad)
+
+
+def test_ad_click_url_is_not_shown():
+    ad = "https://www.google.com/aclk?sa=L&adurl=https://www.moyoplan.com?utm_source%3Dgoogle"
+    assert filter_sources([{"url": ad, "title": "광고"}], ["moyoplan.com"]) == []          # 광고 리다이렉트는 허용 도메인 밖
+    assert clean_url("https://www.moyoplan.com/plans/1?utm_source=google&gclid=x&gad_source=1") ==         "https://www.moyoplan.com/plans/1"

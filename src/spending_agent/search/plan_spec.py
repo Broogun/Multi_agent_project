@@ -59,10 +59,12 @@ ALLOWED_DOMAINS: list[dict] = [
     {"domain": "uplusumobile.com", "name": "U+유모바일", "kind": "알뜰폰", "address_checked": True, "verified": False},
     {"domain": "sk7mobile.com", "name": "SK7모바일", "kind": "알뜰폰", "address_checked": True, "verified": False},
     {"domain": "liivm.com", "name": "KB리브모바일", "kind": "알뜰폰", "address_checked": True, "verified": False},
+    {"domain": "direct.lghellovision.net", "name": "LG헬로모바일", "kind": "알뜰폰", "address_checked": True, "verified": False},
+    # 모요: 민간 비교 서비스. 링크만 보여 준다 (요금 데이터는 쓰지 않음). 공식 API 는 문의 후 제공 → 향후 과제
+    {"domain": "moyoplan.com", "name": "모요", "kind": "비교", "address_checked": True, "verified": False},
     {"domain": "sktelecom.com", "name": "SKT", "kind": "통신사", "address_checked": False, "verified": False},
     {"domain": "kt.com", "name": "KT", "kind": "통신사", "address_checked": True, "verified": False},
     {"domain": "lguplus.com", "name": "LG U+", "kind": "통신사", "address_checked": True, "verified": False},
-    # 헬로모바일: 공식 주소 확인 못 함. 모요 등 민간 비교 서비스: 약관 확인 전이라 제외
 ]
 OFFICIAL_DOMAINS = {d["domain"] for d in ALLOWED_DOMAINS if d["kind"] == "공공"}
 
