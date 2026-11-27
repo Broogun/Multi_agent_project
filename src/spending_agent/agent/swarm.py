@@ -6,6 +6,11 @@
   strategist (전략가)    부족분을 채울 제안을 조합한다. 제안 절감액은 도구 결과의 숫자만.
   reviewer   (리뷰어)    부족분을 코드로 검산하고(check_gap_coverage), 모자라거나 위반이면 strategist 로 반려한다.
 
+온보딩 (docs/10 §2): 목표는 고정 답변에 없다. analyst 가 함정·쟁점과 확인 질문 → counselor 가 목표 대화(ask_user)
+  → strategist 가 달마다 남는 돈을 계산해 보고서(set_report)를 올리고 목표안(propose_goal, 필요 월 저축액은 코드 계산)
+  → reviewer 가 목표안이 남는 돈 + 제안 절감으로 닿는지 검산(check_goal) → counselor 가 보고서·목표안을 전달한다.
+  유저는 목표안을 고친 뒤 목표 생성 버튼을 누른다 (하네스). 만든 목표는 메모리에 남아 주간·월간의 기준이 된다.
+
 바깥 하네스(이 모듈의 결정적 부분)가 강제하는 것:
   - pre_run: 규칙 전처리 (반복결제·가격 변화·새 결제, 카드대금 맞춤, 목표 달성도, 이름 없는 이체) → 작업판에 요약만 올린다.
   - 홉 가드: MAX_HOPS, strategist↔reviewer 반려 MAX_BOUNCE. 넘으면 counselor 로 강제 마무리.
@@ -22,29 +27,31 @@ import datetime as dt
 import json
 from collections.abc import Callable
 
-from ..baseline.harness import FeedbackCtx, UnderstandCtx
+from ..baseline.harness import FeedbackCtx, UnderstandCtx, report_texts
 from ..baseline.llm import LLM, ScriptedLLM, Step, ToolCall
 from ..baseline.single import COMMON, KIND, STATUSES, UNDERSTAND, WEEKDAYS, parse_json
 from ..demo.generator import ISSUE_TYPES
 from ..demo.responses import ACTIONS
 from .memory import AGENTS, MAX_BOUNCE, MAX_HOPS, Board, HandoffNote, UserMemory, new_memory
+from .tools import verify_response
 
 # ------------------------------------------------------------------ 역할별 도구 권한
 DOMAIN: dict[str, list[str]] = {
-    "analyst": ["spending_summary", "list_transactions", "recurring_payments", "unnamed_transfers", "card_bills",
-                "goal_progress", "ask_user"],
-    "strategist": ["spending_summary", "list_transactions", "recurring_payments", "goal_progress", "forecast_goal",
-                   "calculate"],
+    "analyst": ["spending_summary", "flow_summary", "list_transactions", "recurring_payments", "unnamed_transfers",
+                "card_bills", "goal_progress", "ask_user"],
+    "strategist": ["spending_summary", "flow_summary", "list_transactions", "recurring_payments", "goal_progress",
+                   "forecast_goal", "calculate"],
     "reviewer": ["goal_progress", "forecast_goal", "calculate"],
     "counselor": ["calculate", "ask_user"],
 }
 CONTROL: dict[str, list[str]] = {
     "analyst": ["update_issue"],
-    "strategist": ["calculate_many", "propose_action", "drop_action"],
-    "reviewer": ["calculate_many", "check_gap_coverage", "record_review", "update_issue"],
+    "strategist": ["calculate_many", "propose_action", "drop_action", "set_report", "propose_goal"],
+    "reviewer": ["calculate_many", "check_gap_coverage", "check_goal", "record_review", "update_issue"],
     "counselor": ["respond_to_user", "edit_suggestion_text"],
 }
 NO_SAVING_ACTIONS = ("목표 조정",)      # 절감액이 아니라 필요액을 바꾸는 제안
+CHECK_TOOLS = ("check_gap_coverage", "check_goal")   # 코드 검산 기록 (에이전트 도구 호출 수에 넣지 않는다)
 
 # ------------------------------------------------------------------ 비용 상한 (P1 실측 338만 토큰 → 줄이기)
 NO_CACHE = ("ask_user", "calculate", "forecast_goal")
@@ -86,6 +93,27 @@ CONTROL_SPECS = {
     "check_gap_coverage": {
         "description": "코드 검산: 월 부족분(도구 결과에 있는 숫자) 대비 제안 절감 합계와 남은 부족분.",
         "parameters": {"type": "object", "properties": {"monthly_shortfall": _INT}, "required": ["monthly_shortfall"]}},
+    "set_report": {
+        "description": ("온보딩 보고서를 작업판에 올린다. 숫자는 모두 이번 도구 결과(calculate_many 등)에 있어야 한다. "
+                        "남는 돈 = 수입 − 지출 (카드대금·충전은 빼고, 정산 입금·환불은 지출에서 빼고, 생활 이체·현금 인출은 지출, "
+                        "저축 이체는 남는 돈)."),
+        "parameters": {"type": "object", "properties": {
+            "months": {"type": "array", "items": {"type": "object", "properties": {
+                "month": _STR, "income": _INT, "spending": _INT, "leftover": _INT}}},
+            "monthly_leftover": {"type": "integer", "description": "달마다 남는 돈의 평균"},
+            "categories": {"type": "array", "items": {"type": "object", "properties": {"category": _STR, "monthly": _INT}}},
+            "patterns": {"type": "array", "items": _STR}, "summary": _STR},
+            "required": ["monthly_leftover"]}},
+    "propose_goal": {
+        "description": ("온보딩 목표안을 올린다 (유저가 대화에서 말한 목표). 필요 월 저축액과 줄여야 할 금액(필요 − 남는 돈)은 "
+                        "코드가 forecast_goal·calculate 로 계산한다. 보고서(set_report)를 먼저 올려야 한다."),
+        "parameters": {"type": "object", "properties": {
+            "name": _STR, "amount": _INT, "deadline": {"type": "string", "description": "YYYY-MM-DD"},
+            "current_saved": {"type": "integer", "description": "지금 모아 둔 돈 (고정 답변)"}},
+            "required": ["name", "amount", "deadline", "current_saved"]}},
+    "check_goal": {
+        "description": "코드 검산: 목표안의 필요 월 저축액 − 월 남는 돈 − 제안 절감 합계 = 남은 부족분 (0 이면 닿는다).",
+        "parameters": {"type": "object", "properties": {}}},
     "record_review": {
         "description": "리뷰 결론을 남긴다. ok=false 면 사유를 적고 strategist 로 반려한다.",
         "parameters": {"type": "object", "properties": {"ok": {"type": "boolean"}, "reason": _STR},
@@ -132,6 +160,21 @@ RULES = """[지금] {today} ({wd}) {kind}. 다음 피드백: {nxt}
 쟁점 상태: {statuses}
 제안 행동: {actions}.
 제안 강도는 행동에 맞는 칸만: 줄이기 per_week / 저축 늘리기·상한 정하기 amount / 바꾸기 to / 목표 조정 deadline(+amount)."""
+
+# 온보딩에서만 붙이는 역할 지시 (목표는 대화로 정한다)
+ONBOARDING_ROLE = {
+    "analyst": ("[온보딩] 고정 답변에 목표가 없다. 함정·쟁점을 정리하고 꼭 필요한 확인 질문만 한다 (목표 대화 몫으로 질문 2개는 "
+                "남겨 둔다). 끝나면 handoff_to_counselor 로 목표 대화를 부탁한다."),
+    "counselor": ("[온보딩] 목표가 아직 없으면 ask_user 로 목표(무엇을 위해·얼마·언제까지)와 바꿀 여지(시점·금액)를 묻고, "
+                  "답을 바통 메모에 적어 handoff_to_strategist. 보고서·목표안이 리뷰를 통과했으면 respond_to_user 로 끝낸다 "
+                  "(보고서와 목표안이 함께 나가고, 유저가 목표안을 고친 뒤 목표 생성 버튼을 누른다)."),
+    "strategist": ("[온보딩] ① flow_summary·spending_summary 로 달마다 수입·지출을 보고 이중 집계를 걸러 calculate_many 로 "
+                   "달마다 남는 돈과 평균을 계산해 set_report. ② 유저가 말한 목표로 propose_goal (필요 월 저축액·줄여야 할 금액은 "
+                   "코드가 계산). 줄여야 할 금액을 현실적인 제안으로 못 채우면 유저가 말한 범위 안에서 시점·금액을 바꿔 다시 "
+                   "propose_goal. ③ 줄일 후보는 propose_action. 다 했으면 handoff_to_reviewer."),
+    "reviewer": ("[온보딩] check_goal 로 목표안이 남는 돈 + 제안 절감으로 닿는지 검산하고 record_review. 못 닿는데 유저가 말한 "
+                 "범위 안에서 시점·금액을 바꿀 여지가 있으면 반려한다. 여지가 없으면 남은 부족분을 적고 통과시킨다."),
+}
 
 FALLBACK_MESSAGE = "이번 피드백은 쟁점만 정리했어요. 제안은 다음에 다시 살펴볼게요."
 
@@ -228,7 +271,7 @@ class SwarmAgent:
         out = self._swarm(ctx, board, meta)
         # 비교 공정성: 에이전트가 부른 도구와 하네스 전처리를 따로 센다 (싱글은 전처리가 없다)
         meta["harness_tool_calls"] = n1 - n0
-        meta["tool_calls"] = sum(1 for t in ctx.tools.log[n1:] if t.get("name") != "check_gap_coverage")
+        meta["tool_calls"] = sum(1 for t in ctx.tools.log[n1:] if t.get("name") not in CHECK_TOOLS)
         meta["trace"] = board.trace
         meta["forced"] = board.forced
         # 해결된 쟁점은 이번에 알린 뒤 빼고, 최근 것을 남긴다 (오래된 것부터 자른다)
@@ -242,6 +285,8 @@ class SwarmAgent:
         if ev["kind"] == "replies":
             if ev.get("fixed_answers"):
                 self.memory["fixed_answers"] = ev["fixed_answers"]
+            if ev.get("goal"):                       # 유저가 목표 생성 버튼으로 만든 목표 (고친 칸 포함)
+                self.memory["goal"] = {**ev["goal"], "edits": ev.get("goal_edits", [])}
             self.memory["qa"] = (self.memory["qa"]
                                  + [{"date": ev["feedback_date"], **q} for q in ev["qa"]])[-MEMORY_CAPS["qa"]:]
             self.memory["recent_decisions"] = (
@@ -357,7 +402,15 @@ class SwarmAgent:
 
     def _fallback(self, board: Board) -> dict:
         return {"issues": list(board.issues.values()), "goal": {"on_track": None, "summary": ""},
-                "suggestions": self._approved(board), "message": FALLBACK_MESSAGE}
+                "suggestions": self._approved(board), "message": FALLBACK_MESSAGE, **self._onboarding_out(board)}
+
+    @staticmethod
+    def _onboarding_out(board: Board) -> dict:
+        """보고서는 숫자 검증을 통과한 것이라 그대로, 목표안은 리뷰를 통과했을 때만 내보낸다."""
+        out = {"report": dict(board.report)} if board.report else {}
+        if board.goal_proposal and board.review.get("ok"):
+            out["goal_proposal"] = dict(board.goal_proposal)
+        return out
 
     @staticmethod
     def _approved(board: Board) -> list[dict]:
@@ -374,7 +427,8 @@ class SwarmAgent:
             names = list(CONTROL["counselor"])
         specs += [{"name": n, **CONTROL_SPECS[n]} for n in names]
         day = dt.date.fromisoformat(ctx.today)
-        system = (f"{COMMON}\n\n{ROLE[role]}\n\n" + RULES.format(
+        extra = f"\n{ONBOARDING_ROLE[role]}" if ctx.kind == "onboarding" else ""
+        system = (f"{COMMON}\n\n{ROLE[role]}{extra}\n\n" + RULES.format(
             today=ctx.today, wd=WEEKDAYS[day.weekday()], kind=KIND[ctx.kind], nxt=ctx.next_feedback or "없음",
             max_q=ctx.tools.max_questions, issue_types=", ".join(ISSUE_TYPES), statuses=", ".join(STATUSES),
             actions=", ".join(ACTIONS)))
@@ -482,7 +536,7 @@ class SwarmAgent:
         a = {**a, "saving_monthly": saving}
         keys = ("target", "action", "per_week", "amount", "to", "deadline", "saving_monthly", "basis", "text")
         board.proposals.append({k: a[k] for k in keys if a.get(k) is not None})
-        board.review, board.gap = {}, {}             # 조합이 바뀌면 검산·검증을 다시 받는다
+        board.review, board.gap, board.goal_check = {}, {}, {}           # 조합이 바뀌면 검산·검증을 다시 받는다
         return {"ok": True, "proposals": len(board.proposals)}
 
     def _c_drop_action(self, ctx, board: Board, a: dict) -> dict:
@@ -490,7 +544,7 @@ class SwarmAgent:
         if not isinstance(i, int) or not 0 <= i < len(board.proposals):
             return {"ok": False, "error": "없는 번호"}
         board.proposals.pop(i)
-        board.review, board.gap = {}, {}
+        board.review, board.gap, board.goal_check = {}, {}, {}
         return {"ok": True, "proposals": len(board.proposals)}
 
     def _c_check_gap_coverage(self, ctx, board: Board, a: dict) -> dict:
@@ -511,10 +565,70 @@ class SwarmAgent:
                                          "sources": [], "as_of": ctx.today, "caveats": []}})
         return {"ok": True, **board.gap}
 
+    # ---------------------------------------------------------------- 온보딩: 보고서·목표안·목표 검산
+    def _c_set_report(self, ctx, board: Board, a: dict) -> dict:
+        left = a.get("monthly_leftover")
+        if not isinstance(left, int) or isinstance(left, bool):
+            return {"ok": False, "error": "monthly_leftover 는 calculate 로 계산한 정수여야 한다."}
+        rep = {"months": [{k: m.get(k) for k in ("month", "income", "spending", "leftover")}
+                          for m in (a.get("months") or []) if isinstance(m, dict)][:6],
+               "monthly_leftover": left,
+               "categories": [{"category": str(c.get("category", "")), "monthly": c.get("monthly")}
+                              for c in (a.get("categories") or []) if isinstance(c, dict)][:8],
+               "patterns": _list(a.get("patterns"))[:6], "summary": str(a.get("summary", ""))[:200]}
+        v = verify_response("\n".join(report_texts({"report": rep})), ctx.tools.results())
+        if not v["ok"]:
+            return {"ok": False, "error": f"도구 결과에 없는 숫자: {', '.join(v['bad'])}. calculate_many 로 계산한 값만 쓴다."}
+        board.report = rep
+        if board.goal_proposal:                      # 남는 돈이 바뀌면 목표안의 줄여야 할 금액·검산·리뷰를 다시 한다
+            board.goal_proposal, board.goal_check, board.review = {}, {}, {}
+        return {"ok": True, "report": rep}
+
+    def _c_propose_goal(self, ctx, board: Board, a: dict) -> dict:
+        if not board.report:
+            return {"ok": False, "error": "set_report 로 보고서(월 남는 돈)를 먼저 올려라."}
+        amount, saved, deadline = a.get("amount"), a.get("current_saved"), str(a.get("deadline", ""))[:10]
+        if not all(isinstance(x, int) and not isinstance(x, bool) and x >= 0 for x in (amount, saved)) or amount <= saved:
+            return {"ok": False, "error": "amount(목표 금액)와 current_saved(모아 둔 돈)는 정수이고 목표 금액이 더 커야 한다."}
+        try:
+            if dt.date.fromisoformat(deadline) <= dt.date.fromisoformat(ctx.today):
+                raise ValueError
+        except ValueError:
+            return {"ok": False, "error": "deadline 은 오늘 뒤의 YYYY-MM-DD 여야 한다."}
+        f = ctx.tools.call("forecast_goal", {"goal_amount": amount, "current_saved": saved, "deadline": deadline})
+        if f.get("status") != "ok":
+            return {"ok": False, "error": f"forecast_goal 실패: {f.get('caveats')}"}
+        need, left = f["value"]["monthly_required"], board.report["monthly_leftover"]
+        cut = ctx.tools.call("calculate", {"expression": f"{need} - {left}"})["value"]["result"]
+        board.goal_proposal = {"name": str(a.get("name", ""))[:40], "amount": amount, "deadline": deadline,
+                               "current_saved": saved, "monthly_required": need}
+        board.report["required_cut"] = max(0, cut)
+        board.goal_check, board.review = {}, {}      # 목표안이 바뀌면 검산·리뷰를 다시 받는다
+        return {"ok": True, "monthly_required": need, "monthly_leftover": left, "required_cut": max(0, cut),
+                "calc": f"{f['calc']['monthly_required']} / 줄여야 할 금액 {need:,} − {left:,} = {cut:,}"}
+
+    def _c_check_goal(self, ctx, board: Board, a: dict) -> dict:
+        if not board.goal_proposal:
+            return {"ok": False, "error": "목표안이 없다. strategist 가 propose_goal 로 올려야 한다."}
+        need, left = board.goal_proposal["monthly_required"], board.report["monthly_leftover"]
+        savers = [p for p in board.proposals if p.get("saving_monthly")]
+        total = sum(int(p["saving_monthly"]) for p in savers)
+        remaining = max(0, need - left - total)
+        board.goal_check = {"monthly_required": need, "monthly_leftover": left, "proposed_saving_sum": total,
+                            "remaining_gap": remaining, "feasible": remaining == 0,
+                            "calc": f"{need:,} − {left:,} − ({' + '.join(f'{int(p['saving_monthly']):,}' for p in savers) or '0'})"
+                                    f" = 남은 부족분 {remaining:,}"}
+        ctx.tools.log.append({"name": "check_goal", "args": a,
+                              "output": {"status": "ok", "value": board.goal_check, "calc": {"goal": board.goal_check["calc"]},
+                                         "sources": [], "as_of": ctx.today, "caveats": []}})
+        return {"ok": True, **board.goal_check}
+
     def _c_record_review(self, ctx, board: Board, a: dict) -> dict:
         ok = _true(a.get("ok"))
-        if ok and board.proposals and not board.gap:
-            return {"ok": False, "error": "check_gap_coverage 로 검산한 뒤에 통과시켜라."}
+        if ok and board.proposals and not board.gap and not board.goal_check:
+            return {"ok": False, "error": "check_gap_coverage(또는 온보딩은 check_goal)로 검산한 뒤에 통과시켜라."}
+        if ok and board.goal_proposal and not board.goal_check:
+            return {"ok": False, "error": "check_goal 로 목표안을 검산한 뒤에 통과시켜라."}
         board.review = {"ok": ok, "reason": str(a.get("reason", ""))[:300]}
         return {"ok": True, "review": board.review}
 
@@ -526,11 +640,11 @@ class SwarmAgent:
         return {"ok": True}
 
     def _respond(self, board: Board, a: dict) -> dict:
-        if board.proposals and not board.review.get("ok") and not board.forced:
-            return {"ok": False, "error": "리뷰를 통과하지 않은 제안이 있다. handoff_to_reviewer 로 검증받아라."}
+        if (board.proposals or board.goal_proposal) and not board.review.get("ok") and not board.forced:
+            return {"ok": False, "error": "리뷰를 통과하지 않은 제안·목표안이 있다. handoff_to_reviewer 로 검증받아라."}
         goal = {"on_track": a.get("goal_on_track"), "summary": str(a.get("goal_summary", ""))}
         out = {"issues": list(board.issues.values()), "goal": goal, "suggestions": self._approved(board),
-               "message": str(a.get("message", ""))}
+               "message": str(a.get("message", "")), **self._onboarding_out(board)}
         return {"ok": True, "out": out}
 
     # ================================================================ 메모리
@@ -538,11 +652,12 @@ class SwarmAgent:
         """역할별로 필요한 메모리만. analyst 는 전체, 나머지는 목표·보호 지출·유저 정보·최근 반응만 (쟁점은 작업판에 있다)."""
         m = self.memory
         if role == "analyst":
-            view = {"고정 답변": m["fixed_answers"], "유저 정보": m["profile"], "소비 패턴": m["patterns"],
+            view = {"고정 답변": m["fixed_answers"], "목표": m.get("goal"), "유저 정보": m["profile"], "소비 패턴": m["patterns"],
                     "다음에 물을 질문": m["queued_questions"], "활성 쟁점": m["active_issues"],
                     "지난 목표 판단": m["last_goal"], "제안과 유저 반응": m["recent_decisions"], "질문과 답": m["qa"]}
         else:
-            view = {"고정 답변": m["fixed_answers"], "유저 정보": m["profile"], "제안과 유저 반응": m["recent_decisions"]}
+            view = {"고정 답변": m["fixed_answers"], "목표": m.get("goal"), "유저 정보": m["profile"],
+                    "제안과 유저 반응": m["recent_decisions"]}
         return json.dumps(view, ensure_ascii=False, default=str)
 
     def _apply_understanding(self, out: dict, ref: str | None = None) -> None:
